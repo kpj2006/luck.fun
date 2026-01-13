@@ -1,0 +1,23 @@
+{
+  "name": "rugs.fun",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "npx tsc -b && node dist/index.js",
+    "updatetype": "supabase gen types typescript --project-id apneajyhbpncbciasirk > src/types/supabase.ts"
+  },
+  "author": "",
+  "license": "ISC",
+  "keywords": [],
+  "description": "",
+  "dependencies": {
+    "@supabase/ssr": "^0.7.0",
+    "@supabase/supabase-js": "^2.58.0",
+    "@types/ws": "^8.18.1",
+    "dotenv": "^17.2.3",
+    "typescript": "^5.9.3",
+    "uuid": "^13.0.0",
+    "ws": "^8.18.3"
+  }
+}
