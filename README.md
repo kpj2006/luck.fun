@@ -1,4 +1,4 @@
-# Rugs-Fun - 100xSchool Hackathon Project
+# Rugs-Fun 
 
 ## 📝 Brief Description
 
@@ -73,15 +73,4 @@ The game integrates **Web3 wallets**, **real-time WebSocket events**, and **on-c
 - **Anchor Framework** (Smart contracts)
 - **Phantom Wallet SDKs** (Authentication & payments)
 
----
 
-## 🧩 Additional Features (Planned / In Progress)
-
-- 🧠 AI-Powered Game Analytics
-    - Predictive insights based on user performance and timing.
-- 🧾 NFT-Based Player Badges
-    - Unique collectible badges for top players.
-- 🪙 Multi-Token Support
-    - Play and earn using multiple SPL tokens.
-- ⚙️ Enhanced Game Economy
-    - Buy-ins, streak multipliers, and in-game bonuses.
