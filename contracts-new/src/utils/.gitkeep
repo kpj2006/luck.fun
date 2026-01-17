@@ -1,0 +1,4 @@
+# Placeholder for utility contracts
+# This folder will contain:
+# - Constants.sol (platform constants)
+# - Errors.sol (custom error definitions)

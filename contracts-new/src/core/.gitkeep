@@ -1,0 +1,5 @@
+# Placeholder for core contracts
+# This folder will contain:
+# - RugsFun.sol (main contract)
+# - GameManager.sol (game logic)
+# - Treasury.sol (fee management)

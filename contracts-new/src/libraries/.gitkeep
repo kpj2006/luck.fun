@@ -1,0 +1,4 @@
+# Placeholder for shared libraries
+# This folder will contain:
+# - GameLib.sol (game helper functions)
+# - Math helpers if needed
