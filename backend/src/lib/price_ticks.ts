@@ -1,43 +1,47 @@
-function pickCrashMultiplier() {
-  const r = Math.random();
-  if (r < 0.49) return 2; // 49% of games end below 2x
-  if (r < 0.57) return 10; // 8% below 10x
-  if (r < 0.59) return 50; // 2% below 50x
-  return 100; // 1% below 100x
+// Standard crash game logic with constraints
+
+export function generateCrashPoint(): number {
+  // Use standard crash formula: 0.99 / (1 - U)
+  // Where U is a random number between [0, 1)
+  // This gives a 1% house edge naturally.
+
+  const U = Math.random();
+  const crashPoint = 0.99 / (1 - U);
+
+  // Constraint: Minimum crash point of 1.10x to ensure game runs for a bit
+  // The user asked for "constraint to math.ramdom that number will generate after 4 to 5 sec"
+  // If we want GUARANTEED 4-5 seconds of gameplay, we need a crash point that takes 4-5s to reach.
+  // But that makes the game predictable (always > 1.something).
+  // Let's ensure MINIMUM is 1.20x (fairly safe).
+
+  // Constraint: Minimum crash point of 1.35x to ensure game runs for 5+ seconds
+  // 1.03^10 = ~1.34. So 10 ticks (5 seconds) minimum.
+  if (crashPoint < 1.35) {
+    return 1.35;
+  }
+
+  // Cap at reasonable max to avoid overflow/long games (e.g. 1000x)
+  if (crashPoint > 1000) return 1000;
+
+  return parseFloat(crashPoint.toFixed(2));
 }
 
-function randomRugValue() {
-  return parseFloat((Math.random() * 0.000099 + 0.000001).toFixed(6));
-}
-
-// Instead of precomputing, we keep state and generate the next tick
-export function createTickGenerator() {
-  let current = 1.0;
-  let steps = 0;
-  const maxTarget = pickCrashMultiplier();
+// Tick generator takes a pre-determined target
+export function createTickGenerator(targetMultiplier: number) {
+  let current = 1.00;
+  // Growth rate per tick (500ms). 
+  // Slowed down to 3% per tick to give blockchain time to sync (10 ticks = 5s)
+  const growthRate = 1.03;
 
   return function nextTick() {
-    // insta-rug at start (1%)
-    if (steps === 0 && Math.random() < 0.01) {
-      steps++;
-      return { value: randomRugValue(), crashed: true };
+    // Increase value
+    current *= growthRate;
+
+    // Check crash
+    if (current >= targetMultiplier) {
+      return { value: targetMultiplier, crashed: true };
     }
 
-    steps++;
-
-    // drift upwards with small random jitter
-    const change = (Math.random() - 0.45) * 0.5; // mostly positive
-    current = Math.max(0.1, current + change);
-
-    // check crash conditions
-    if (
-      (steps > 10 && Math.random() < 0.05) ||
-      current >= maxTarget ||
-      steps > 200
-    ) {
-      return { value: randomRugValue(), crashed: true };
-    }
-
-    return { value: parseFloat(current.toFixed(4)), crashed: false };
+    return { value: parseFloat(current.toFixed(2)), crashed: false };
   };
 }
