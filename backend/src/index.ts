@@ -3,6 +3,7 @@ import { createTickGenerator } from "./lib/price_ticks";
 import { supabase } from "./lib/supabase";
 import { v4 as uuidv4 } from "uuid";
 import dotenv from "dotenv";
+import { getPlayerBalance, processWithdrawal } from "./lib/contracts";
 interface Trade {
   id: number;
   buy: number;
@@ -46,11 +47,11 @@ let globalChats: {
   username: string;
   message: string;
 }[] = [
-  {
-    username: "System",
-    message: "Welcome to the global chat. Be respectful and have fun!",
-  },
-];
+    {
+      username: "System",
+      message: "Welcome to the global chat. Be respectful and have fun!",
+    },
+  ];
 
 // --- Broadcast Helper ---
 const broadcast = (data: any) => {
@@ -81,6 +82,7 @@ const startGame = () => {
       .insert({
         game_id: gameId,
       })
+      .select()
       .then((res) => {
         console.log("Insert response:", res);
 
@@ -220,7 +222,7 @@ wss.on("connection", (ws) => {
     count: wss.clients.size,
   });
 
-  ws.on("message", (message) => {
+  ws.on("message", async (message) => {
     try {
       const data = JSON.parse(message.toString());
 
@@ -245,6 +247,57 @@ wss.on("connection", (ws) => {
           type: "global-chat",
           chats: globalChats,
         });
+      }
+
+      // --- WITHDRAW ---
+      if (data.type === "withdraw") {
+        const { userId, amount } = data;
+
+        // Process withdrawal directly from blockchain (Supabase sync optional)
+        const result = await processWithdrawal(userId, amount.toString());
+
+        if (!result.success) {
+          ws.send(
+            JSON.stringify({
+              type: "error",
+              message: result.error || "Withdrawal failed",
+            })
+          );
+          return;
+        }
+
+        // Get new balance from contract
+        const newBalance = await getPlayerBalance(userId);
+
+        ws.send(
+          JSON.stringify({
+            type: "withdrawal-success",
+            txHash: result.txHash,
+            newBalance: newBalance,
+          })
+        );
+
+        console.log(`✅ Withdrawal processed for ${userId}: ${amount} RUGS, tx: ${result.txHash}`);
+      }
+
+      // --- GET BALANCE ---
+      if (data.type === "get-balance") {
+        try {
+          const balance = await getPlayerBalance(data.userId);
+          ws.send(
+            JSON.stringify({
+              type: "balance",
+              balance,
+            })
+          );
+        } catch (error: any) {
+          ws.send(
+            JSON.stringify({
+              type: "error",
+              message: error.message,
+            })
+          );
+        }
       }
 
       // --- Identify / Reconnect user ---
@@ -392,7 +445,6 @@ wss.on("connection", (ws) => {
 startGame();
 
 console.log(
-  `✅ WebSocket server running on ${
-    process.env.CLIENT_URL ?? "ws://localhost:8080"
+  `✅ WebSocket server running on ${process.env.CLIENT_URL ?? "ws://localhost:8080"
   } `
 );
