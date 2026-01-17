@@ -46,6 +46,16 @@ interface IRugsFun {
     /// @param maxWithdrawal New maximum withdrawal per transaction
     event WithdrawalLimitsUpdated(uint256 minWithdrawal, uint256 maxWithdrawal);
 
+    /// @notice Emitted when winnings are credited to a user
+    /// @param user Address of the user
+    /// @param amount Amount credited
+    event WinningsCredited(address indexed user, uint256 amount);
+
+    /// @notice Emitted when a user's balance is debited (loss)
+    /// @param user Address of the user
+    /// @param amount Amount debited
+    event LossDebited(address indexed user, uint256 amount);
+
     // ============ User Functions ============
     
     /// @notice Deposit tokens into the platform
@@ -55,6 +65,20 @@ interface IRugsFun {
     /// @notice Withdraw tokens from the platform
     /// @param amount Amount of tokens to withdraw
     function withdraw(uint256 amount) external;
+
+    /// @notice Credit winnings to a user's balance
+    /// @param user Address of the user to credit
+    /// @param amount Amount of tokens to credit
+    function creditWinnings(address user, uint256 amount) external;
+
+    /// @notice Debit loss from a user's balance
+    /// @param user Address of the user to debit
+    /// @param amount Amount of tokens to debit
+    function debitLoss(address user, uint256 amount) external;
+
+    /// @notice Transfer collected fees to treasury
+    /// @param amount Amount of tokens to transfer
+    function collectFees(uint256 amount) external;
     
     /// @notice Get user's balance
     /// @param user Address of the user
@@ -72,6 +96,10 @@ interface IRugsFun {
     /// @notice Update treasury address
     /// @param newTreasury New treasury address
     function setTreasury(address newTreasury) external;
+
+    /// @notice Update game manager address
+    /// @param newGameManager New game manager address
+    function setGameManager(address newGameManager) external;
     
     /// @notice Update deposit limits
     /// @param minDeposit New minimum deposit amount

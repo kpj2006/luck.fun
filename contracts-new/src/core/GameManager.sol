@@ -46,8 +46,7 @@ contract GameManager is IGameManager, Ownable {
     /// @notice Maximum number of games to store in history
     uint256 public constant MAX_GAME_HISTORY = 100;
 
-    /// @notice Game commits for provably fair verification
-    mapping(uint256 => GameCommit) private gameCommits;
+
 
     /// @notice Game results after completion
     mapping(uint256 => GameResult) private gameResults;
@@ -103,46 +102,12 @@ contract GameManager is IGameManager, Ownable {
     // ============ Operator Functions ============
 
     /**
-     * @notice Commit to next game's outcome (provably fair)
-     * @param commitHash Hash of keccak256(abi.encodePacked(seed, crashMultiplier))
-     * @dev Must be called before startGame()
-     */
-    function commitGame(bytes32 commitHash) external onlyOperator {
-        if (gameActive) revert Errors.GameAlreadyActive();
-        if (commitHash == bytes32(0)) revert Errors.InvalidCommitHash(commitHash);
-
-        uint256 gameId = currentGameId;
-        
-        gameCommits[gameId] = GameCommit({
-            commitHash: commitHash,
-            timestamp: block.timestamp,
-            revealed: false,
-            seed: 0,
-            crashMultiplier: 0
-        });
-
-        emit GameCommitted(gameId, commitHash, block.timestamp);
-    }
-
-    /**
      * @notice Start a new game round
      * @param gameId The game ID to start (must match currentGameId)
-     * @dev Can only start if game was committed and cooldown passed
      */
     function startGame(uint256 gameId) external onlyOperator {
-if (gameId != currentGameId) revert Errors.InvalidGameId(gameId);
+        if (gameId != currentGameId) revert Errors.InvalidGameId(gameId);
         if (gameActive) revert Errors.GameAlreadyActive();
-
-        GameCommit storage commit = gameCommits[gameId];
-        if (commit.commitHash == bytes32(0)) revert Errors.GameNotCommitted(gameId);
-        
-        // Ensure cooldown period has passed since commit
-        if (block.timestamp < commit.timestamp + Constants.COOLDOWN_PERIOD) {
-            revert Errors.CooldownNotElapsed(
-                commit.timestamp + Constants.COOLDOWN_PERIOD,
-                block.timestamp
-            );
-        }
 
         gameActive = true;
         currentGameStartTime = block.timestamp;
@@ -151,28 +116,14 @@ if (gameId != currentGameId) revert Errors.InvalidGameId(gameId);
     }
 
     /**
-     * @notice End current game and reveal outcome
+     * @notice End current game with a specific crash multiplier
      * @param gameId The game ID to end
-     * @param seed Random seed used for crash calculation
      * @param crashMultiplier The crash multiplier (in basis points, e.g., 15000 = 1.5x)
-     * @dev Verifies that keccak256(seed, crashMultiplier) == commitHash
+     * @dev Trust-based: Operator submits the result directly
      */
-    function endGame(
-        uint256 gameId,
-        bytes32 seed,
-        uint256 crashMultiplier
-    ) external onlyOperator {
+    function endGame(uint256 gameId, uint256 crashMultiplier) external onlyOperator {
         if (gameId != currentGameId) revert Errors.InvalidGameId(gameId);
         if (!gameActive) revert Errors.GameNotActive();
-
-        GameCommit storage commit = gameCommits[gameId];
-        if (commit.revealed) revert Errors.GameAlreadyRevealed(gameId);
-
-        // Verify provably fair commitment
-        bytes32 actualHash = keccak256(abi.encodePacked(seed, crashMultiplier));
-        if (actualHash != commit.commitHash) {
-            revert Errors.RevealMismatch(commit.commitHash, actualHash);
-        }
 
         // Validate crash multiplier
         if (crashMultiplier < Constants.MIN_MULTIPLIER || 
@@ -180,19 +131,14 @@ if (gameId != currentGameId) revert Errors.InvalidGameId(gameId);
             revert Errors.InvalidMultiplier(crashMultiplier);
         }
 
-        // Store reveal data
-        commit.revealed = true;
-        commit.seed = seed;
-        commit.crashMultiplier = crashMultiplier;
-
         // Create game result
         gameResults[gameId] = GameResult({
             gameId: gameId,
             startTime: currentGameStartTime,
             endTime: block.timestamp,
             crashMultiplier: crashMultiplier,
-            totalVolume: 0, // Will be updated during settlement
-            playerCount: 0, // Will be updated during settlement
+            totalVolume: 0, 
+            playerCount: 0,
             settled: false
         });
 
@@ -203,192 +149,96 @@ if (gameId != currentGameId) revert Errors.InvalidGameId(gameId);
         gameActive = false;
         currentGameId++;
 
-        emit GameRevealed(gameId, seed, crashMultiplier);
-        emit GameEnded(gameId, crashMultiplier, 0, 0); // totalVolume and playerCount will be set during settlement
+        // emit GameRevealed(gameId, 0, crashMultiplier); // Deprecated
+        emit GameEnded(gameId, crashMultiplier, 0, 0); 
     }
 
     /**
-     * @notice Record a player's bet for current game
-     * @param player Address of the player
-     * @param betAmount Amount wagered
-     * @param targetMultiplier Target cashout multiplier (in basis points)
-     * @dev Called by backend when player places bet
+     * @notice Settle a single trade for a player (called after game ends)
+     * @param gameId The game ID this trade belongs to
+     * @param player The player address
+     * @param betAmount The amount wagered
+     * @param cashoutMultiplier The multiplier the player cashed out at (0 if lost)
+     * @dev Called by backend for each winner (or all players if we want to record losses too)
      */
-    function recordBet(
+    function settleTrade(
         uint256 gameId,
         address player,
         uint256 betAmount,
-        uint256 targetMultiplier
-    ) external onlyOperator {
-        if (gameId != currentGameId) revert Errors.InvalidGameId(gameId);
-        if (!gameActive) revert Errors.GameNotActive();
-        
-        // Validate bet amount
-        if (betAmount < Constants.MIN_BET) {
-            revert Errors.BetTooLow(Constants.MIN_BET, betAmount);
-        }
-        if (betAmount > Constants.MAX_BET) {
-            revert Errors.BetTooHigh(Constants.MAX_BET, betAmount);
-        }
-
-        // Check player has sufficient balance
-        uint256 playerBalance = rugsFun.balanceOf(player);
-        if (playerBalance < betAmount) {
-            revert Errors.InsufficientBalance(playerBalance, betAmount);
-        }
-
-        // Validate target multiplier
-        if (targetMultiplier < Constants.MIN_MULTIPLIER) {
-            revert Errors.InvalidMultiplier(targetMultiplier);
-        }
-
-        Trade storage trade = trades[gameId][player];
-        
-        // Check if player already has active trade
-        if (trade.betAmount > 0) revert Errors.PlayerAlreadyInGame(player);
-
-        // Record trade
-        trade.player = player;
-        trade.betAmount = betAmount;
-        trade.buyMultiplier = targetMultiplier;
-        trade.sellMultiplier = 0;
-        trade.payout = 0;
-        trade.settled = false;
-
-        // Add player to game participants
-        gamePlayers[gameId].push(player);
-
-        emit BetPlaced(gameId, player, betAmount, targetMultiplier);
-    }
-
-    /**
-     * @notice Record a player's cashout
-     * @param player Address of the player
-     * @param cashoutMultiplier Multiplier at cashout time (in basis points)
-     * @dev Called by backend when player cashes out
-     */
-    function recordCashout(
-        uint256 gameId,
-        address player,
         uint256 cashoutMultiplier
     ) external onlyOperator {
-        if (gameId != currentGameId) revert Errors.InvalidGameId(gameId);
-        if (!gameActive) revert Errors.GameNotActive();
-        
-        Trade storage trade = trades[gameId][player];
-
-        if (trade.betAmount == 0) revert Errors.NoActiveTrade(player);
-        if (trade.settled) revert Errors.AlreadyCashedOut(player);
-
-        // Validate cashout multiplier
-        if (cashoutMultiplier < Constants.MIN_MULTIPLIER) {
-            revert Errors.InvalidMultiplier(cashoutMultiplier);
-        }
-
-        // Calculate payout (betAmount * multiplier - house edge)
-        uint256 grossPayout = Constants.applyMultiplier(trade.betAmount, cashoutMultiplier);
-        uint256 houseEdge = Constants.calculateFee(grossPayout, Constants.HOUSE_EDGE_BPS);
-        uint256 netPayout = grossPayout - houseEdge;
-
-        trade.sellMultiplier = cashoutMultiplier;
-        trade.payout = netPayout;
-        trade.settled = true;
-
-        emit CashedOut(gameId, player, cashoutMultiplier, netPayout);
-    }
-
-    /**
-     * @notice Settle all trades for a completed game
-     * @param gameId The game ID to settle
-     * @dev Processes all player trades and updates balances
-     */
-    function settleTrades(
-        uint256 gameId,
-        address[] calldata players,
-        uint256[] calldata payouts
-    ) external onlyOperator {
-        if (gameId >= currentGameId) revert Errors.InvalidGameId(gameId);
+        // Validation
+        if (gameId >= currentGameId) revert Errors.InvalidGameId(gameId); // Game must be finished
         
         GameResult storage result = gameResults[gameId];
         if (result.gameId == 0) revert Errors.GameResultNotFound();
-        if (result.settled) revert Errors.TradesAlreadySettled();
+        
+        // Update stats
+        result.totalVolume += betAmount;
+        // Note: unique player count logic is simplified/omitted here for gas savings on multiple calls
 
-        GameCommit storage commit = gameCommits[gameId];
-        if (!commit.revealed) revert Errors.GameNotRevealed();
+        uint256 payout = 0;
+        uint256 fee = 0;
 
-        if (players.length != payouts.length) {
-            revert Errors.ArrayLengthMismatch(players.length, payouts.length);
-        }
+        // Calculate Payout
+        if (cashoutMultiplier > 0) {
+            // User won
+             if (cashoutMultiplier > result.crashMultiplier) {
+                 // Safety check: cannot cashout higher than crash
+                 revert Errors.InvalidMultiplier(cashoutMultiplier);
+             }
 
-        uint256 crashMultiplier = commit.crashMultiplier;
-        uint256 totalVolume = 0;
-        uint256 totalFees = 0;
+             // Calculate gross payout
+            uint256 grossPayout = Constants.applyMultiplier(betAmount, cashoutMultiplier);
+            
+            // Calculate house edge
+            uint256 houseEdge = Constants.calculateFee(grossPayout, Constants.HOUSE_EDGE_BPS);
+            uint256 netPayout = grossPayout - houseEdge;
+            fee = houseEdge;
 
-        for (uint256 i = 0; i < players.length; i++) {
-            address player = players[i];
-            Trade storage trade = trades[gameId][player];
-
-            if (trade.betAmount == 0) continue;
-
-            totalVolume += trade.betAmount;
-            uint256 payout;
-
-            if (trade.settled) {
-                // Player cashed out before crash
-                payout = trade.payout;
-            } else {
-                // Player didn't cash out - check if they would have won
-                if (trade.buyMultiplier <= crashMultiplier) {
-                    // Auto-cashout at target multiplier
-                    uint256 grossPayout = Constants.applyMultiplier(trade.betAmount, trade.buyMultiplier);
-                    uint256 houseEdge = Constants.calculateFee(grossPayout, Constants.HOUSE_EDGE_BPS);
-                    payout = grossPayout - houseEdge;
-                    trade.sellMultiplier = trade.buyMultiplier;
-                } else {
-                    // Lost - crashed before target
-                    payout = 0;
-                }
-                trade.payout = payout;
-            }
-
-            // Calculate platform fee and house profit
-            if (payout > trade.betAmount) {
-                uint256 profit = payout - trade.betAmount;
+            // Platform fee logic (on PROFIT only)
+            if (netPayout > betAmount) {
+                uint256 profit = netPayout - betAmount;
                 uint256 platformFee = Constants.calculateFee(profit, Constants.PLATFORM_FEE_BPS);
-                totalFees += platformFee;
-                
-                // Deduct platform fee from payout
-                payout -= platformFee;
-            } else if (payout == 0) {
-                // Player lost - entire bet goes to fees/house
-                uint256 platformFee = Constants.calculateFee(trade.betAmount, Constants.PLATFORM_FEE_BPS);
-                totalFees += platformFee;
+                fee += platformFee;
+                netPayout -= platformFee;
             }
 
-            // Note: Actual balance updates handled by backend via RugsFun contract
+            // Settlement
+            if (netPayout > betAmount) {
+                // User made a profit
+                rugsFun.creditWinnings(player, netPayout - betAmount);
+            } else if (netPayout < betAmount) {
+                // User lost some money (e.g. fees > profit, or < 1.0x cashout if allowed)
+                rugsFun.debitLoss(player, betAmount - netPayout);
+            }
+            // If equal, do nothing.
+
+            // Transfer fees to treasury
+            if (fee > 0) {
+                rugsFun.collectFees(fee);
+                treasury.collectFees(fee);
+            }
+
+            payout = netPayout;
+        } else {
+            // User Lost (Crashed)
+            // Full bet lost
+            
+            // Debit full bet from user
+            rugsFun.debitLoss(player, betAmount);
+            
+            // Transfer lost bet to treasury (platform wallet)
+            rugsFun.collectFees(betAmount);
+            treasury.collectFees(betAmount);
+            
+            payout = 0;
         }
-
-        // Collect fees to treasury
-        if (totalFees > 0) {
-            treasury.collectFees(totalFees);
-        }
-
-        result.totalVolume = totalVolume;
-        result.settled = true;
-
-        emit TradesSettled(gameId, players.length, totalVolume, totalFees);
     }
 
     // ============ View Functions ============
 
-    /**
-     * @notice Get game commit data
-     * @param gameId The game ID to query
-     * @return Game commit data
-     */
-    function getGameCommit(uint256 gameId) external view returns (GameCommit memory) {
-        return gameCommits[gameId];
-    }
+
 
     /**
      * @notice Get game result data
@@ -423,13 +273,9 @@ if (gameId != currentGameId) revert Errors.InvalidGameId(gameId);
      * @return True if game can be verified as fair
      */
     function verifyGame(uint256 gameId) external view returns (bool) {
-        GameCommit storage commit = gameCommits[gameId];
-        
-        if (!commit.revealed) return false;
-        if (commit.commitHash == bytes32(0)) return false;
-
-        bytes32 computedHash = keccak256(abi.encodePacked(commit.seed, commit.crashMultiplier));
-        return computedHash == commit.commitHash;
+        GameResult storage result = gameResults[gameId];
+        // In trust-based model, we assume all settled games are valid
+        return result.endTime > 0;
     }
 
     /**

@@ -9,15 +9,6 @@ pragma solidity ^0.8.20;
 interface IGameManager {
     // ============ Structs ============
     
-    /// @notice Game commit data for provably fair verification
-    struct GameCommit {
-        bytes32 commitHash;      // Hash of (seed + crashMultiplier)
-        uint256 timestamp;       // When game was committed
-        bool revealed;           // Whether game has been revealed
-        bytes32 seed;            // Random seed (revealed after game)
-        uint256 crashMultiplier; // Crash point (revealed after game)
-    }
-    
     /// @notice Game result data
     struct GameResult {
         uint256 gameId;          // Unique game identifier
@@ -40,18 +31,6 @@ interface IGameManager {
     }
 
     // ============ Events ============
-    
-    /// @notice Emitted when a new game is committed
-    /// @param gameId Unique game identifier
-    /// @param commitHash Hash of the commit
-    /// @param timestamp When game was committed
-    event GameCommitted(uint256 indexed gameId, bytes32 commitHash, uint256 timestamp);
-    
-    /// @notice Emitted when a game is revealed
-    /// @param gameId Game identifier
-    /// @param seed Random seed
-    /// @param crashMultiplier Crash point
-    event GameRevealed(uint256 indexed gameId, bytes32 seed, uint256 crashMultiplier);
     
     /// @notice Emitted when a game starts
     /// @param gameId Game identifier
@@ -124,58 +103,30 @@ interface IGameManager {
 
     // ============ Operator Functions ============
     
-    /// @notice Commit a new game (called before game starts)
-    /// @param commitHash Hash of (seed + crashMultiplier)
-    function commitGame(bytes32 commitHash) external;
-    
-    /// @notice Start a committed game
+    /// @notice Start a game (trust-based)
     /// @param gameId Game identifier
     function startGame(uint256 gameId) external;
     
-    /// @notice End a game and reveal the crash point
+    /// @notice End a game and set the crash point
     /// @param gameId Game identifier
-    /// @param seed Random seed used
     /// @param crashMultiplier Crash multiplier
-    function endGame(uint256 gameId, bytes32 seed, uint256 crashMultiplier) external;
+    function endGame(uint256 gameId, uint256 crashMultiplier) external;
     
-    /// @notice Record a player's bet
+    /// @notice Settle a single trade for a player
     /// @param gameId Game identifier
     /// @param player Player address
-    /// @param amount Bet amount
-    /// @param multiplier Current multiplier
-    function recordBet(
+    /// @param betAmount Bet amount
+    /// @param cashoutMultiplier Multiplier at cashout (0 if lost)
+    function settleTrade(
         uint256 gameId,
         address player,
-        uint256 amount,
-        uint256 multiplier
-    ) external;
-    
-    /// @notice Record a player's cashout
-    /// @param gameId Game identifier
-    /// @param player Player address
-    /// @param multiplier Cashout multiplier
-    function recordCashout(
-        uint256 gameId,
-        address player,
-        uint256 multiplier
-    ) external;
-    
-    /// @notice Settle trades for a game (batch process)
-    /// @param gameId Game identifier
-    /// @param players Array of player addresses
-    /// @param payouts Array of payout amounts
-    function settleTrades(
-        uint256 gameId,
-        address[] calldata players,
-        uint256[] calldata payouts
+        uint256 betAmount,
+        uint256 cashoutMultiplier
     ) external;
 
     // ============ View Functions ============
     
-    /// @notice Get game commit data
-    /// @param gameId Game identifier
-    /// @return GameCommit struct
-    function getGameCommit(uint256 gameId) external view returns (GameCommit memory);
+
     
     /// @notice Get game result data
     /// @param gameId Game identifier

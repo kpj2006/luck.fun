@@ -38,11 +38,11 @@ library Constants {
     /// @notice Maximum bet amount (100 tokens)
     uint256 public constant MAX_BET = 100 ether;
     
-    /// @notice Minimum multiplier (1.01x)
-    uint256 public constant MIN_MULTIPLIER = 101;
+    /// @notice Minimum multiplier (1.00x)
+    uint256 public constant MIN_MULTIPLIER = 100;
     
-    /// @notice Maximum multiplier achievable (100x)
-    uint256 public constant MAX_MULTIPLIER = 10000;
+    /// @notice Maximum multiplier achievable (1000x)
+    uint256 public constant MAX_MULTIPLIER = 100000;
     
     /// @notice House edge percentage in basis points (2% = 200 bps)
     uint256 public constant HOUSE_EDGE_BPS = 200;
@@ -80,8 +80,8 @@ library Constants {
     /// @notice Basis points denominator (100% = 10000 bps)
     uint256 public constant BPS_DENOMINATOR = 10000;
     
-    /// @notice Multiplier precision (for representing 1.5x as 1500)
-    uint256 public constant MULTIPLIER_PRECISION = 1000;
+    /// @notice Multiplier precision (1.00x = 100)
+    uint256 public constant MULTIPLIER_PRECISION = 100;
     
     /// @notice Percentage precision (for calculations)
     uint256 public constant PERCENTAGE_PRECISION = 100;

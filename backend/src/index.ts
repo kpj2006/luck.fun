@@ -1,11 +1,13 @@
 import WebSocket, { WebSocketServer } from "ws";
-import { createTickGenerator } from "./lib/price_ticks";
+import { createTickGenerator, generateCrashPoint } from "./lib/price_ticks";
 import { supabase } from "./lib/supabase";
 import { v4 as uuidv4 } from "uuid";
 import dotenv from "dotenv";
-import { getPlayerBalance, processWithdrawal } from "./lib/contracts";
+import { getPlayerBalance, processWithdrawal, onChainStartGame, onChainEndGame, onChainSettleTrade, gameManagerContract, syncBalance } from "./lib/contracts";
+import { ethers } from "ethers";
 interface Trade {
   id: number;
+  gameId: number;
   buy: number;
   buy_amount: number;
   sell?: number;
@@ -16,6 +18,7 @@ interface Trade {
 interface User {
   userId: string;
   trades: Trade[];
+  socket?: WebSocket;
 }
 
 interface GameTick {
@@ -66,39 +69,68 @@ const broadcast = (data: any) => {
 dotenv.config();
 
 // --- Start Game ---
-const startGame = () => {
-  console.log("🚀 Game started");
+const startGame = async () => {
   // Reset per-game state
   users = [];
   currentGameTicks = [];
-  tickGenerator = createTickGenerator();
-  gameState = "ACTIVE";
-  gameId = uuidv4();
+  const target = generateCrashPoint();
+  tickGenerator = createTickGenerator(target);
+  gameState = "WAITING"; // Don't allow bets until on-chain is ready
 
-  console.log("Attempting to insert game_id:", gameId);
+  // Get numerical game ID from contract
   try {
-    supabase
-      .from("games_rugs_fun")
-      .insert({
-        game_id: gameId,
-      })
-      .select()
-      .then((res) => {
-        console.log("Insert response:", res);
+    const isActive = await gameManagerContract.gameActive();
+    let onChainId = await gameManagerContract.currentGameId();
+    gameId = Number(onChainId);
 
-        if (res.error) {
-          console.error("ERROR INSERTING GAME:", res);
-        } else {
-          console.log("✅ Successfully inserted Game ID:", gameId);
-          console.log("Insert data:", res.data);
-        }
-      });
-  } catch (error) {
-    console.log(`Error`, error);
+    if (isActive) {
+      console.log(`⚠️ Game ${gameId} is already active on-chain. Resetting...`);
+      await onChainEndGame(gameId, 1.0);
+      // Wait a moment for state to settle
+      await new Promise(r => setTimeout(r, 2000));
+      onChainId = await gameManagerContract.currentGameId();
+      gameId = Number(onChainId);
+    }
+
+    console.log(`📡 Syncing with Monad: Game ID ${gameId}`);
+
+    // 1. Register in Supabase first (Upsert to avoid collisions)
+    const { error: sbError } = await supabase
+      .from("games_rugs_fun")
+      .upsert({
+        game_id: gameId.toString(),
+      }, { onConflict: 'game_id' });
+
+    if (sbError) {
+      console.error("❌ Supabase Game Registration Failed:", sbError);
+      // We can continue if it's just a duplicate, but logged it
+    } else {
+      console.log(`✅ Supabase Sync: Game ${gameId} registered.`);
+    }
+
+    // 2. Start on-chain (WAIT for it)
+    console.log(`⛓️  Starting Game ${gameId} on-chain...`);
+    const startRes = await onChainStartGame(gameId);
+
+    if (!startRes.success) {
+      console.error(`🛑 ABORT: Failed to start game ${gameId} on-chain. Check wallet/nonce.`);
+      gameState = "WAITING";
+      // Schedule a restart? No, let user fix or wait for next tick.
+      // For now, retry index.ts manually if this happens.
+      return;
+    }
+
+    console.log(`🚀 Game ${gameId} ACTIVE on-chain!`);
+    gameState = "ACTIVE";
+
+  } catch (err) {
+    console.error("❌ Fatal Startup Error:", err);
+    gameState = "WAITING";
+    return;
   }
 
   // Tick generator loop
-  gameInterval = setInterval(() => {
+  gameInterval = setInterval(async () => {
     const tick = tickGenerator();
     currentMultiplier = tick.value;
     // Record tick
@@ -118,6 +150,40 @@ const startGame = () => {
       gameState = "CRASHED";
       console.log(`💥Game crashed at multiplier: ${currentMultiplier}`);
 
+      // 1. End Game On-Chain
+      await onChainEndGame(gameId, currentMultiplier);
+
+      // 1.5 Settle ALL Trades (Winners & Losers)
+      for (const user of users) {
+        const activeTrade = user.trades.find((t) => t.gameId === gameId);
+        if (activeTrade) {
+          const cashoutMultiplier = activeTrade.sell || 0;
+          console.log(`🏦 On-chain settling Game ${gameId} for ${user.userId} (Mult: ${cashoutMultiplier})`);
+
+          try {
+            await onChainSettleTrade(
+              gameId,
+              user.userId,
+              activeTrade.buy_amount.toString(),
+              cashoutMultiplier
+            );
+            await syncBalance(user.userId);
+
+            // Final trade update broadcast
+            if (user.socket && user.socket.readyState === WebSocket.OPEN) {
+              user.socket.send(JSON.stringify({
+                type: "trade-update",
+                userId: user.userId,
+                trades: user.trades,
+                new_balance: await getPlayerBalance(user.userId)
+              }));
+            }
+          } catch (err) {
+            console.error(`❌ Failed to settle trade for ${user.userId}:`, err);
+          }
+        }
+      }
+
       // Save finished game to history
       previousGames.push({
         id: Date.now(),
@@ -130,25 +196,22 @@ const startGame = () => {
         previousGames.shift();
       }
       const total_volume = currentGameTicks
-        .map((data) => data.value) // get array of values
-        .reduce((acc, val) => acc + val, 0); // sum them
+        .map((data) => data.value)
+        .reduce((acc, val) => acc + val, 0);
       currentGameTicks = [];
 
-      // Update off chain ledger securely
+      // Update off chain ledger
       supabase
         .from("games_rugs_fun")
         .update({
           crash_multiplier: currentMultiplier,
           total_volume: total_volume,
         })
-        .eq("game_id", gameId)
-        .then((res) => {
-          if (res.error) {
-            console.error("ERROR INSERTING GAME");
-          }
+        .eq("game_id", gameId.toString())
+        .then(({ error }) => {
+          if (error) console.error("❌ Error updating game in Supabase:", error);
+          else console.log("✅ Game result updated in Supabase.");
         });
-
-      // Broadcast crash
       broadcast({
         type: "tick",
         multiplier: currentMultiplier,
@@ -266,8 +329,8 @@ wss.on("connection", (ws) => {
           return;
         }
 
-        // Get new balance from contract
-        const newBalance = await getPlayerBalance(userId);
+        // Sync balance after withdrawal
+        const newBalance = await syncBalance(userId);
 
         ws.send(
           JSON.stringify({
@@ -283,7 +346,7 @@ wss.on("connection", (ws) => {
       // --- GET BALANCE ---
       if (data.type === "get-balance") {
         try {
-          const balance = await getPlayerBalance(data.userId);
+          const balance = await syncBalance(data.userId);
           ws.send(
             JSON.stringify({
               type: "balance",
@@ -302,8 +365,12 @@ wss.on("connection", (ws) => {
 
       // --- Identify / Reconnect user ---
       if (data.type === "identify") {
+        // Sync balance on reconnect
+        syncBalance(data.userId);
+
         const user = users.find((u) => u.userId === data.userId);
         if (user) {
+          user.socket = ws;
           ws.send(
             JSON.stringify({
               type: "trade-restore",
@@ -329,14 +396,20 @@ wss.on("connection", (ws) => {
       }
       // --- BUY ---
       if (data.type === "buy") {
+        // Sync balance before buy to ensure deposit reflected
+        await syncBalance(data.userId);
+
         let user = users.find((u) => u.userId === data.userId);
         if (!user) {
-          user = { userId: data.userId, trades: [] };
+          user = { userId: data.userId, trades: [], socket: ws };
           users.push(user);
+        } else {
+          user.socket = ws;
         }
 
         const trade: Trade = {
           id: Date.now(),
+          gameId: gameId,
           buy: currentMultiplier,
           buy_amount: data.buyAmount,
           userId: user.userId,
@@ -345,9 +418,9 @@ wss.on("connection", (ws) => {
         supabase
           .rpc("buy_trade", {
             p_wallet_address: data.userId,
-            p_amount: data.buyAmount,
+            p_amount: data.buyAmount / 1000000000,
             p_payout_multiplier: currentMultiplier,
-            p_game_id: gameId,
+            p_game_id: gameId.toString(),
           })
           .then(({ data, error }: { data: any; error: any }) => {
             if (error) console.error(error);
@@ -370,67 +443,36 @@ wss.on("connection", (ws) => {
         const user = users.find((u) => u.userId === data.userId);
         if (!user) return;
 
-        const openTrade = user.trades.find((t) => t.sell === undefined);
-        const openGlobalTrade = userTrades.find((t) => t.sell === undefined);
+        const openTrade = user.trades.find((t) => t.sell === undefined && t.gameId === gameId);
+        const openGlobalTrade = userTrades.find((t) => t.sell === undefined && t.gameId === gameId);
         if (!openTrade) return;
         if (!openGlobalTrade) return;
 
-        openTrade.sell = currentMultiplier;
-        openTrade.pnl =
-          ((currentMultiplier - openTrade.buy) / openTrade.buy) * 100;
-
-        // Updating the state of global
-        openTrade.sell = currentMultiplier;
-        openGlobalTrade.pnl =
-          ((currentMultiplier - openGlobalTrade.buy) / openGlobalTrade.buy) *
-          100;
+        openTrade.sell = data.sell; // Use client multiplier
+        openTrade.pnl = ((data.sell - openTrade.buy) / openTrade.buy) * 100;
 
         supabase
           .rpc("sell_trade", {
             p_wallet_address: data.userId,
-            p_sell_multiplier: currentMultiplier,
-            p_game_id: gameId,
+            p_sell_multiplier: data.sell,
+            p_game_id: gameId.toString(),
           })
           .then(({ data: rpcData, error }) => {
             if (error) {
               console.error("❌ Error selling trade:", error);
-              ws.send(
-                JSON.stringify({
-                  type: "error",
-                  message: error.message || "Failed to sell trade",
-                })
-              );
+              ws.send(JSON.stringify({ type: "error", message: error.message }));
               return;
             }
-            console.log("✅ Trade sold successfully for user:", data.userId);
+            console.log("✅ Trade sold successfully (Off-chain) for user:", data.userId);
 
-            // Update local state
-            openTrade.sell = currentMultiplier;
-            openTrade.pnl =
-              ((currentMultiplier - openTrade.buy) / openTrade.buy) * 100;
-
-            // Update global trades array
-            const openGlobalTrade = userTrades.find(
-              (t) => t.userId === data.userId && t.sell === undefined
-            );
-            if (openGlobalTrade) {
-              openGlobalTrade.sell = currentMultiplier;
-              openGlobalTrade.pnl = openTrade.pnl;
-            }
-            console.log("✅ Sold trade result:", rpcData);
+            // Update local state is already done above, but refresh from RPC results if needed
             // Broadcast updated trades to specific user
             broadcast({
               type: "trade-update",
               userId: user.userId,
               trades: user.trades,
-              new_balance: data.new_balance,
+              new_balance: (rpcData as any)?.new_balance,
             });
-
-            // Broadcast all trades update to everyone
-            // broadcast({
-            //   type: "all-trades",
-            //   trades: userTrades,
-            // });
           });
       }
     } catch (err) {

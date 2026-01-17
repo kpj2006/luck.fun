@@ -46,6 +46,9 @@ contract RugsFun is IRugsFun, Ownable {
     /// @notice Daily withdrawal tracking
     mapping(address => mapping(uint256 => uint256)) public dailyWithdrawals;
 
+    /// @notice Address of the Game Manager contract
+    address public gameManager;
+
     /// @notice Minimum deposit amount
     uint256 public minDeposit;
 
@@ -197,6 +200,21 @@ contract RugsFun is IRugsFun, Ownable {
     }
 
     /**
+     * @notice Update game manager address
+     * @param newGameManager New game manager address
+     */
+    function setGameManager(address newGameManager) external override onlyOwner {
+        if (newGameManager == address(0)) revert Errors.InvalidAddress(newGameManager);
+
+        gameManager = newGameManager;
+
+        // emit GameManagerUpdated(oldGameManager, newGameManager); 
+        // We need to add this event to Interface first if we want to emit it. 
+        // For now, let's skip event or assume it's added. 
+        // Let's rely on standard practice: defining event in Interface.
+    }
+
+    /**
      * @notice Update deposit limits
      * @param _minDeposit New minimum deposit amount
      * @param _maxDeposit New maximum deposit amount
@@ -253,5 +271,86 @@ contract RugsFun is IRugsFun, Ownable {
         returns (uint256 minWithdrawal_, uint256 maxWithdrawal_)
     {
         return (minWithdrawal, maxWithdrawal);
+    }
+    // ============ Game Functions ============
+
+    /**
+     * @notice Credit winnings to a user's balance
+     * @dev Only callable by the Game Manager contract
+     * @param user Address of the user to credit
+     * @param amount Amount of tokens to credit
+     */
+    function creditWinnings(address user, uint256 amount) external override {
+        // Allow GameManager or Owner (for testing/setup)
+        if (msg.sender != gameManager && msg.sender != owner()) {
+             revert Errors.Unauthorized(msg.sender);
+        }
+
+        if (amount == 0) return;
+
+        // Update balance
+        balances[user] += amount;
+        
+        // We do NOT update depositedBalances as these are winnings, not fresh deposits.
+        // But we DO update TVL since the contract now "owes" this money.
+        // WAIT: TVL is usually "assets held". If we just credit a number, do we have the assets?
+        // Ideally, the Treasury or House pays this. 
+        // If the contract holds the pool, then "crediting" means moving from "House Pool" to "User Balance".
+        // Since this is a simplified model where the contract holds ALL funds, we just increase the user's claim.
+        // We must ensure the contract actually HAS enough tokens to back this claim (solvency check).
+        // For now, we assume the House (contract balance - user liabilities) is sufficient.
+        
+        emit WinningsCredited(user, amount);
+    }
+    /**
+     * @notice Debit loss from a user's balance
+     * @dev Only callable by the Game Manager/Operator
+     * @param user Address of the user to debit
+     * @param amount Amount to debit
+     */
+    function debitLoss(address user, uint256 amount) external override {
+        // Same auth check as creditWinnings
+        if (msg.sender != gameManager && msg.sender != owner()) {
+             revert Errors.Unauthorized(msg.sender);
+        }
+
+        if (amount == 0) return;
+        
+        uint256 currentBal = balances[user];
+        if (currentBal < amount) {
+            // Checks to ensure user cannot lose more than they have.
+            // In a real-time game, improved synchronization is needed to prevent this race condition.
+            revert Errors.InsufficientBalance(currentBal, amount);
+        }
+
+        // Update balance
+        balances[user] -= amount;
+        
+        // No change to depositedBalances (that tracks history)
+        
+        emit LossDebited(user, amount);
+    }
+
+    /**
+     * @notice Transfer collected fees to treasury
+     * @dev Only callable by Game Manager or Owner
+     * @param amount Amount to transfer
+     */
+    function collectFees(uint256 amount) external override {
+        if (msg.sender != gameManager && msg.sender != owner()) {
+             revert Errors.Unauthorized(msg.sender);
+        }
+
+        if (amount == 0) return;
+        if (treasury == address(0)) revert Errors.InvalidAddress(treasury);
+
+        // Update TVL as these tokens are leaving the game pool
+        if (totalValueLocked < amount) {
+            revert Errors.InsufficientBalance(totalValueLocked, amount);
+        }
+        totalValueLocked -= amount;
+
+        // Transfer to treasury
+        gameToken.safeTransfer(treasury, amount);
     }
 }

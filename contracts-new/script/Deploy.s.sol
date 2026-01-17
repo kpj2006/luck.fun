@@ -79,10 +79,13 @@ contract Deploy is Script {
         console2.log("   GameManager deployed at:", address(gameManager));
         console2.log("");
 
-        // 4. Configure Treasury to accept fees from GameManager
-        console2.log("4. Configuring Treasury...");
+        // 4. Configure Treasury and RugsFun
+        console2.log("4. Configuring Treasury and RugsFun...");
         treasury.setFeeCollector(address(gameManager));
-        console2.log("   Fee collector set to GameManager");
+        console2.log("   Treasury Fee collector set to GameManager");
+        
+        rugsFun.setGameManager(address(gameManager));
+        console2.log("   RugsFun Game manager set to GameManager");
         console2.log("");
 
         vm.stopBroadcast();

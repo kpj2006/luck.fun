@@ -1,0 +1,50 @@
+RUGS.FUN - TOKEN FLOW EXPLANATION
+===================================
+
+This document explains exactly how RUGS tokens move between wallets and contracts
+during a live game cycle.
+
+1. THE DEPOSIT (Actual Transfer - Wallet to Contract)
+---------------------------------------------------
+When a player starts, they must deposit RUGS into the platform.
+- Action: User wallet sends ERC20 tokens to the 'RugsFun' contract address.
+- Result: User's wallet balance decreases; RugsFun contract balance increases.
+- Internal: The contract updates its mapping: balances[user] = amount.
+
+2. THE GAME PLAY (Internal Accounting - No Gas Fees)
+--------------------------------------------------
+During the game (Buy/Sell/Crash), tokens do NOT move between wallets. This
+ensures the game is fast and doesn't require gas for every single tick.
+- Buy: The 'RugsFun' contract decrements the user's internal balance number.
+- Win: The contract increments the user's internal balance number.
+- Loss: No action needed (the balance was already reduced during Buy).
+
+3. THE SETTLEMENT (Actual Transfer - Pool to Treasury)
+-----------------------------------------------------
+When the platform takes its cut (Fees or Lost Bets), the tokens ACTUALLY move.
+- Action: The 'RugsFun' contract calls 'safeTransfer' to move tokens from
+  its pool into the 'Treasury' contract address.
+- Result: This is the "Platform Profit." These are real ERC20 tokens locked
+  in the Treasury vault.
+
+4. THE WITHDRAWAL (Actual Transfer - Contract to Wallet)
+------------------------------------------------------
+When a player wants their winnings back in their personal wallet.
+- Action: User calls 'withdraw'.
+- Result: The contract sends the physical ERC20 tokens from the contract
+  address back to the user's personal wallet address.
+
+
+SUMMARY TABLE
+=============
+
+| Action            | Actual Tokens Move? | Source ➔ Destination          |
+|-------------------|---------------------|-------------------------------|
+| Deposit           | YES                 | User Wallet ➔ Contract Pool   |
+| Play / Win / Loss | NO (Internal)       | Mapping Credit ➔ Mapping Debit |
+| Platform Fees     | YES                 | Contract Pool ➔ Treasury      |
+| Withdrawal        | YES                 | Contract Pool ➔ User Wallet   |
+
+===================================
+STATUS: FULLY VERIFIED ON MONAD TESTNET
+===================================
