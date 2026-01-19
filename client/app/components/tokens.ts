@@ -1,15 +1,11 @@
+import { CONTRACTS, TOKEN_DISPLAY } from "@/constants/constants";
+
 export const TOKENS = [
   {
-    symbol: "USDC",
-    name: "USDC",
-    mint: "9SFMpR2owdeZpGRLomHsDtx5rEf2bVuo3XCgSjyAVUf4",
-    img: "https://mcvzbtnedtysipzkwmuz.supabase.co/storage/v1/object/public/uploads/usdc-devnet.png",
-  },
-  {
-    symbol: "SOL",
-    name: "Solana",
-    mint: "J8NDF3RxtfZ5E2vks2NdchwE3PXNMNwUngCpEbMoLaoL",
-    img: "https://mcvzbtnedtysipzkwmuz.supabase.co/storage/v1/object/public/uploads/solana-coin.png",
+    symbol: TOKEN_DISPLAY.symbol,
+    name: TOKEN_DISPLAY.name,
+    mint: CONTRACTS.RUGS_TOKEN,
+    img: TOKEN_DISPLAY.img,
   },
 ] as const;
 

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { WS_URL } from "@/constants/constants";
 import { useUserInformation } from "./userInfo";
+import { toast } from "sonner";
 
 export default function useGameWebSocket() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -57,7 +59,7 @@ export default function useGameWebSocket() {
     const storedId = localStorage.getItem("userId") || "guest";
     setUserId(storedId);
   }, []);
-  const url = process.env.NEXT_PUBLIC_BACKEND_URL ?? "ws://localhost:8080";
+  const url = WS_URL;
   // --------------------------------------------------
   // 🧩 WebSocket Connection
   // --------------------------------------------------
@@ -176,7 +178,11 @@ export default function useGameWebSocket() {
               return [...prev, { userId, trades }];
             }
           });
-          setBalance(new_balance);
+          setBalance(Number(new_balance));
+        }
+        if (data.type === "withdrawal-success") {
+          toast.success(`Withdrawal successful! TX: ${data.txHash.slice(0, 10)}...`);
+          setBalance(Number(data.newBalance));
         }
         if (data.type === "prev-game") {
           setPreviousGames(data.data);

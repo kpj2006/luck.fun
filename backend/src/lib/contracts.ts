@@ -41,8 +41,13 @@ const provider = new ethers.JsonRpcProvider(
   {
     chainId: Number(process.env.CHAIN_ID) || 10143,
     name: "monad-testnet",
+    ensAddress: null as any, // Force-disable ENS for ethers v6
   },
-  { staticNetwork: true }
+  { 
+    staticNetwork: true,
+    batchMaxCount: 1,
+    pollingInterval: 6000,
+  }
 );
 
 // Resilient request helper
@@ -82,6 +87,9 @@ export const gameManagerContract = new ethers.Contract(
 
 // Helper functions
 export async function syncBalance(walletAddress: string): Promise<string> {
+  if (!ethers.isAddress(walletAddress)) {
+    throw new Error(`Invalid wallet address: ${walletAddress}`);
+  }
   return await withRetry(async () => {
     const rawBalance = await rugsFunContract.balances(walletAddress);
     const balanceEth = ethers.formatEther(rawBalance);
@@ -105,6 +113,9 @@ export async function syncBalance(walletAddress: string): Promise<string> {
 }
 
 export async function getPlayerBalance(walletAddress: string): Promise<string> {
+  if (!ethers.isAddress(walletAddress)) {
+    throw new Error(`Invalid wallet address: ${walletAddress}`);
+  }
   return await withRetry(async () => {
     // Read from contract directly for most up-to-date value
     const balance = await rugsFunContract.balances(walletAddress);
@@ -117,6 +128,9 @@ export async function processDeposit(
   amount: string
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
   try {
+    if (!ethers.isAddress(walletAddress)) {
+      return { success: false, error: `Invalid wallet address: ${walletAddress}` };
+    }
     // Note: User must approve RUGS token to RugsFun contract first (frontend handles this)
     // Here we just verify the deposit and sync the latest balance
     const balanceEth = await syncBalance(walletAddress);
@@ -139,6 +153,9 @@ export async function processWithdrawal(
   amount: string
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
   try {
+    if (!ethers.isAddress(walletAddress)) {
+      return { success: false, error: `Invalid wallet address: ${walletAddress}` };
+    }
     const amountWei = ethers.parseEther(amount);
 
     // Check if player has sufficient balance in contract
@@ -168,14 +185,19 @@ export async function processWithdrawal(
   }
 }
 
-export async function claimFaucet(walletAddress: string): Promise<{ success: boolean; txHash?: string }> {
+export async function claimFaucet(walletAddress: string): Promise<{ success: boolean; txHash?: string; error?: string }> {
   try {
+    if (!ethers.isAddress(walletAddress)) {
+      return { success: false, error: "Invalid wallet address" };
+    }
     const tx = await rugsTokenContract.claimFaucet();
     const receipt = await tx.wait();
     return { success: true, txHash: receipt?.hash };
   } catch (error: any) {
     console.error("Error claiming faucet:", error);
-    return { success: false };
+    // Extract revert reason if available
+    const revertReason = error.reason || error.data?.message || error.message || "Unknown error";
+    return { success: false, error: revertReason };
   }
 }
 
@@ -210,6 +232,14 @@ export async function onChainSettleTrade(
   cashoutMultiplier: number
 ): Promise<{ success: boolean; txHash?: string }> {
   try {
+    if (!ethers.isAddress(playerAddress)) {
+      console.error(`Invalid player address for settleTrade: ${playerAddress}`);
+      return { success: false };
+    }
+    if (!/^\d+$/.test(betAmount)) {
+      console.error(`Invalid betAmount for settleTrade: ${betAmount}`);
+      return { success: false };
+    }
     // Scale 9 decimals to 18 for Monad / Ethereum
     const betWei = ethers.toBigInt(betAmount) * 1_000_000_000n;
     const multiplierInt = Math.floor(cashoutMultiplier * 100);

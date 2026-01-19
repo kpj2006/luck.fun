@@ -8,9 +8,9 @@ import React, {
 } from "react";
 import { motion } from "framer-motion";
 import { MessageSquare, Send, User, ChevronLeft } from "lucide-react";
-import { useWallet } from "@solana/wallet-adapter-react";
 import { useUserInformation } from "../hooks/userInfo";
 import { cn } from "@/lib/utils";
+import { useEvmWallet } from "../hooks/evmWallet";
 
 // --- Types ---
 type ChatMessage = {
@@ -38,7 +38,7 @@ export const NeoChatSidebar: React.FC<NeoChatSidebarProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Real Hooks
-  const { publicKey } = useWallet();
+  const { address } = useEvmWallet();
   const { userName } = useUserInformation();
   const actualUsername = userName || "guest";
 
@@ -73,7 +73,7 @@ export const NeoChatSidebar: React.FC<NeoChatSidebarProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && publicKey) {
+    if (e.key === "Enter" && address) {
       e.preventDefault();
       handleSend();
     }
@@ -171,7 +171,7 @@ export const NeoChatSidebar: React.FC<NeoChatSidebarProps> = ({
 
       {/* Input Area */}
       <div className="p-4 bg-zinc-900 border-t-4 border-yellow-400 shrink-0 space-y-3">
-        {!publicKey ? (
+        {!address ? (
           <div className="bg-red-500/10 border-2 border-red-500 border-dashed p-3 text-center">
             <p className="text-red-500 text-xs font-bold mb-2 uppercase">
               Wallet Disconnected

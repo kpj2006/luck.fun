@@ -26,7 +26,7 @@ const nextConfig = {
     return config;
   },
 
-  transpilePackages: ["@solana/wallet-adapter-base"],
+  transpilePackages: [],
 };
 
 export default nextConfig;

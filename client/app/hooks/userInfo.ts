@@ -1,7 +1,8 @@
 import { create } from "zustand";
-import { useWallet } from "@solana/wallet-adapter-react";
 import { useEffect } from "react";
-import { fetchUsername, MaxWithdrawAmountAllowed } from "@/server/server";
+import { supabase } from "@/supabase/client";
+import { readRugsBalance } from "@/lib/evm";
+import { useEvmWallet } from "./evmWallet";
 
 interface UserInformationStore {
   balance: number | null;
@@ -34,11 +35,11 @@ export const useUserInformationStore = create<UserInformationStore>(
     setError: (error: any) => set({ error }),
     setisApplied: (isApplied: boolean) => set({ isApplied }),
 
-    fetchBalance: async (publicKey: string) => {
+    fetchBalance: async (address: string) => {
       set({ loading: true, error: null });
       try {
-        const maxAmount = await MaxWithdrawAmountAllowed(publicKey);
-        set({ balance: Number(maxAmount ?? 0) });
+        const balance = await readRugsBalance(address);
+        set({ balance });
       } catch (err) {
         console.error("Error fetching balance:", err);
         set({ error: err });
@@ -47,17 +48,46 @@ export const useUserInformationStore = create<UserInformationStore>(
       }
     },
 
-    fetchUsernameClient: async (publicKey: string) => {
-      try {
-        const username = await fetchUsername(publicKey);
-        if (username == null) {
-          console.log(`Could not fetch username`);
-          return;
-        }
-        set({ userName: username });
-      } catch (err) {
-        console.error("Error fetching username:", err);
-      }
+    fetchUsernameClient: async (address: string) => {
+      // Skip username fetch since table doesn't have user_name column
+      // try {
+      //   await supabase.from("users_rugsfun").upsert(
+      //     { wallet_address: address },
+      //     { onConflict: "wallet_address" }
+      //   );
+
+      //   const { data, error } = await supabase
+      //     .from("users_rugsfun")
+      //     .select("user_name")
+      //     .eq("wallet_address", address)
+      //     .single();
+
+      //   if (error) {
+      //     console.error("Error fetching username:", error);
+      //     return;
+      //   }
+
+      //   set({ userName: data?.user_name ?? "guest" });
+      // } catch (err) {
+      //   console.error("Error fetching username:", err);
+      // }
+    },
+
+    updateUsername: async (newName: string) => {
+      // Skip username update since table doesn't have user_name column
+      // try {
+      //   const { error } = await supabase
+      //     .from("users_rugsfun")
+      //     .update({ user_name: newName })
+      //     .eq("wallet_address", get().publicKey);
+
+      //   if (error) {
+      //     console.error("Failed to update username:", error);
+      //     return;
+      //   }
+      // } catch (err) {
+      //   console.error("Failed to update username:", err);
+      // }
     },
 
     refetch: async (publicKey: string) => {
@@ -77,18 +107,17 @@ export const useUserInformationStore = create<UserInformationStore>(
 
 // Hook to automatically sync with wallet
 export const useUserInformation = () => {
-  const wallet = useWallet();
+  const wallet = useEvmWallet();
   const store = useUserInformationStore();
 
   useEffect(() => {
-    if (wallet.publicKey) {
-      const publicKeyString = wallet.publicKey.toString();
-      store.fetchBalance(publicKeyString);
-      store.fetchUsernameClient(publicKeyString);
+    if (wallet.address) {
+      store.fetchBalance(wallet.address);
+      store.fetchUsernameClient(wallet.address);
     } else {
       store.reset();
     }
-  }, [wallet.publicKey]);
+  }, [wallet.address]);
 
   return {
     balance: store.balance,
@@ -99,7 +128,6 @@ export const useUserInformation = () => {
     error: store.error,
     isApplied: store.isApplied,
     setisApplied: store.setisApplied,
-    refetch: () =>
-      wallet.publicKey && store.refetch(wallet.publicKey.toString()),
+    refetch: () => wallet.address && store.refetch(wallet.address),
   };
 };

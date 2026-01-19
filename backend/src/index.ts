@@ -167,7 +167,9 @@ const startGame = async () => {
               activeTrade.buy_amount.toString(),
               cashoutMultiplier
             );
-            await syncBalance(user.userId);
+            if (ethers.isAddress(user.userId)) {
+              await syncBalance(user.userId);
+            }
 
             // Final trade update broadcast
             if (user.socket && user.socket.readyState === WebSocket.OPEN) {
@@ -316,6 +318,11 @@ wss.on("connection", (ws) => {
       if (data.type === "withdraw") {
         const { userId, amount } = data;
 
+        if (!ethers.isAddress(userId)) {
+          ws.send(JSON.stringify({ type: "error", message: "Invalid wallet address" }));
+          return;
+        }
+
         // Process withdrawal directly from blockchain (Supabase sync optional)
         const result = await processWithdrawal(userId, amount.toString());
 
@@ -346,6 +353,10 @@ wss.on("connection", (ws) => {
       // --- GET BALANCE ---
       if (data.type === "get-balance") {
         try {
+          if (!ethers.isAddress(data.userId)) {
+            ws.send(JSON.stringify({ type: "error", message: "Invalid wallet address" }));
+            return;
+          }
           const balance = await syncBalance(data.userId);
           ws.send(
             JSON.stringify({
@@ -366,7 +377,9 @@ wss.on("connection", (ws) => {
       // --- Identify / Reconnect user ---
       if (data.type === "identify") {
         // Sync balance on reconnect
-        syncBalance(data.userId);
+        if (ethers.isAddress(data.userId)) {
+          syncBalance(data.userId);
+        }
 
         const user = users.find((u) => u.userId === data.userId);
         if (user) {
@@ -396,6 +409,10 @@ wss.on("connection", (ws) => {
       }
       // --- BUY ---
       if (data.type === "buy") {
+        if (!ethers.isAddress(data.userId)) {
+          ws.send(JSON.stringify({ type: "error", message: "Invalid wallet address" }));
+          return;
+        }
         // Sync balance before buy to ensure deposit reflected
         await syncBalance(data.userId);
 

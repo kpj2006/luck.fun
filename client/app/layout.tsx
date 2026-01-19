@@ -4,7 +4,6 @@ import "./globals.css";
 import AppProvider from "./AppProvider";
 import { Toaster } from "sonner";
 import { Analytics } from "@vercel/analytics/next";
-require("@solana/wallet-adapter-react-ui/styles.css");
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

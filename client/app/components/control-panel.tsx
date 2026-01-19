@@ -2,7 +2,8 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import { cn } from "../../lib/utils";
 import { X, Wallet, Zap, Lock, DollarSign, CheckCircle2 } from "lucide-react";
-import { LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { toast } from "sonner";
+import { BET_UNIT, TOKEN_DISPLAY } from "@/constants/constants";
 
 interface NeoBetInterfaceProps {
   className?: string;
@@ -58,7 +59,20 @@ export const NeoBetInterface: React.FC<NeoBetInterfaceProps> = ({
     }
   }, [amount]);
 
-  const amountPresets = ["0.0001", "0.001", "0.01", "0.1", "0.5", "1.0", "MAX"];
+  // Defensive balance formatting
+  const formattedBalance = React.useMemo(() => {
+    try {
+      if (balance === null || balance === undefined) return "0.0000";
+      const num = Number(balance);
+      if (isNaN(num)) return "0.0000";
+      return num.toFixed(4);
+    } catch (e) {
+      console.error("Error formatting balance:", balance, e);
+      return "0.0000";
+    }
+  }, [balance]);
+
+  const amountPresets = ["0.1", "0.25", "0.5", "1.0", "2.5", "5.0", "MAX"];
 
   const handleAmountInput = (val: string) => {
     if (val === "" || /^\d*\.?\d*$/.test(val)) {
@@ -74,7 +88,7 @@ export const NeoBetInterface: React.FC<NeoBetInterfaceProps> = ({
 
   const applyPreset = (preset: string) => {
     if (preset === "MAX") {
-      const maxVal = parseFloat((balance / LAMPORTS_PER_SOL).toFixed(4));
+      const maxVal = parseFloat(formattedBalance);
       setAmount(maxVal);
       setLocalAmountStr(maxVal.toString());
     } else if (preset === "X") {
@@ -89,16 +103,13 @@ export const NeoBetInterface: React.FC<NeoBetInterfaceProps> = ({
 
   const toggleAutoSell = () => {
     if (autosell && autosell > 0 && !isApplied) {
-      setMessage("Auto-sell activated");
+      toast.success("Auto-sell activated");
       setisApplied(true);
-      setTimeout(() => setMessage(""), 3000);
     } else if (isApplied) {
       setisApplied(false);
-      setMessage("");
     } else {
-      setMessage("Enter a valid multiplier");
+      toast.warning("Enter a valid multiplier");
       setisApplied(false);
-      setTimeout(() => setMessage(""), 2500);
     }
   };
 
@@ -106,14 +117,12 @@ export const NeoBetInterface: React.FC<NeoBetInterfaceProps> = ({
   const handleBuy = () => {
     console.log(`Coming in buy`);
     if (amount <= 0) {
-      setMessage("Invalid Amount");
-      setTimeout(() => setMessage(""), 2000);
+      toast.warning("Invalid Amount");
       return;
     }
 
     if (!publicKey || publicKey === "guest") {
-      setMessage("Connect Wallet");
-      setTimeout(() => setMessage(""), 2000);
+      toast.error("Connect Wallet");
       return;
     }
 
@@ -121,7 +130,7 @@ export const NeoBetInterface: React.FC<NeoBetInterfaceProps> = ({
       ? currentMultiplierRef.current
       : currentMultiplier;
     const buyPrice = parseFloat(rawMult.toFixed(4));
-    const buyAmountLamports = amount * LAMPORTS_PER_SOL;
+    const buyAmountUnits = Math.round(amount * BET_UNIT);
 
     if (wsRef?.current) {
       wsRef.current.send(
@@ -129,19 +138,18 @@ export const NeoBetInterface: React.FC<NeoBetInterfaceProps> = ({
           type: "buy",
           userId: publicKey,
           buy: buyPrice,
-          buyAmount: buyAmountLamports,
+          buyAmount: buyAmountUnits,
         })
       );
     }
 
     // Optimistic balance update
     if (balance !== undefined) {
-      setBalance(balance - buyAmountLamports);
+      setBalance(balance - amount);
     }
 
     if (onTrade) onTrade();
-    setMessage("Bet Placed! 🚀");
-    setTimeout(() => setMessage(""), 2000);
+    toast.success("Bet Placed! 🚀");
   };
 
   const handleSell = () => {
@@ -160,8 +168,7 @@ export const NeoBetInterface: React.FC<NeoBetInterfaceProps> = ({
 
     console.log(`Sold at: ${sellPrice}`);
     if (onTrade) onTrade();
-    setMessage(`Cashed out @ ${sellPrice}x 💰`);
-    setTimeout(() => setMessage(""), 3000);
+    toast.success(`Cashed out @ ${sellPrice}x 💰`);
   };
 
   const isBuyDisabled =
@@ -193,7 +200,7 @@ export const NeoBetInterface: React.FC<NeoBetInterfaceProps> = ({
             <div className="flex flex-col gap-2">
               <div className="relative group">
                 <div className="absolute top-0.5 left-0 text-yellow-400/50 font-mono text-[10px] font-bold">
-                  WAGER (SOL)
+                  WAGER ({TOKEN_DISPLAY.symbol})
                 </div>
                 <input
                   inputMode="decimal"
@@ -233,9 +240,7 @@ export const NeoBetInterface: React.FC<NeoBetInterfaceProps> = ({
                 <div className="flex items-center gap-1.5 bg-zinc-900 border-2 border-zinc-800 px-2 py-0.5 shrink-0">
                   <Wallet size={12} className="text-zinc-500" />
                   <span className="font-mono text-yellow-400 text-xs md:text-sm">
-                    {balance
-                      ? Number((balance / LAMPORTS_PER_SOL).toFixed(4))
-                      : "0.0000"}
+                    {formattedBalance}
                   </span>
                 </div>
               </div>
@@ -326,27 +331,7 @@ export const NeoBetInterface: React.FC<NeoBetInterfaceProps> = ({
           </div>
         </div>
 
-        {/* Floating Message Toast */}
-        <AnimatePresence>
-          {message && (
-            <motion.div
-              initial={{ opacity: 0, y: 10, x: "-50%" }}
-              animate={{ opacity: 1, y: 0, x: "-50%" }}
-              exit={{ opacity: 0, y: -10, x: "-50%" }}
-              className={cn(
-                "absolute top-4 left-1/2 -translate-x-1/2 min-w-[200px] text-center px-3 py-2 border-2 z-50",
-                "font-black text-xs uppercase shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)]",
-                message.includes("Cashed")
-                  ? "bg-green-400 text-black border-black"
-                  : message.includes("Placed")
-                  ? "bg-yellow-400 text-black border-black"
-                  : "bg-red-500 text-white border-white"
-              )}
-            >
-              {message}
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Removed Floating Message Toast in favor of sonner */}
       </div>
     </div>
   );

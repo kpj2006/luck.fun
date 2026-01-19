@@ -79,29 +79,32 @@ export async function addClaimRecord(
   // update the hourly claimed amount
   await recordClaim(address, entry.amount);
 
-  const { error } = await supabase.from("faucet_history").insert({
-    address,
-    mint: entry.mint,
-    amount: entry.amount,
-    ts: new Date(entry.ts).toISOString(),
-    sig: entry.sig || null,
-  });
+  // Skip storing history if table doesn't exist
+  // const { error } = await supabase.from("faucet_history").insert({
+  //   address,
+  //   mint: entry.mint,
+  //   amount: entry.amount,
+  //   ts: new Date(entry.ts).toISOString(),
+  //   sig: entry.sig || null,
+  // });
 
-  if (error) console.error("addClaimRecord error", error);
+  // if (error) console.error("addClaimRecord error", error);
 }
 
 export async function getHistory(address: string) {
-  const { data, error } = await supabase
-    .from("faucet_history")
-    .select("*")
-    .eq("address", address)
-    .order("ts", { ascending: false })
-    .limit(50);
+  // Skip fetching history if table doesn't exist
+  // const { data, error } = await supabase
+  //   .from("faucet_history")
+  //   .select("*")
+  //   .eq("address", address)
+  //   .order("ts", { ascending: false })
+  //   .limit(50);
 
-  if (error) {
-    console.error("getHistory error", error);
-    return [];
-  }
+  // if (error) {
+  //   console.error("getHistory error", error);
+  //   return [];
+  // }
 
-  return data || [];
+  // return data || [];
+  return [];
 }

@@ -1,13 +1,12 @@
 "use client";
 export const dynamic = "force-dynamic";
 import { Label } from "@/components/ui/label";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useEvmWallet } from "./hooks/evmWallet";
 import { useCallback, useEffect, useRef, useState } from "react";
 // import Leaderboard from "./components/leaderboard"; // Replaced
 import useGameWebSocket from "./hooks/socket";
 import { Button } from "@/components/ui/button";
 // import SummaryPrevGames from "./components/summary-data"; // Replaced
-import { LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { useUserInformation } from "./hooks/userInfo";
 // import BetStopLossControl from "./components/control-panel"; // Replaced
 import { Menu, RefreshCcw, Send, Wifi, Users, Wallet } from "lucide-react";
@@ -17,6 +16,7 @@ import { NeoLeaderboardSection } from "./components/leaderboard-components"; // 
 import { NeoBetInterface } from "./components/control-panel"; // Updated
 import { cn } from "@/lib/utils";
 import NeoNavbar from "./components/navbar";
+import { TOKEN_DISPLAY } from "@/constants/constants";
 
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -29,7 +29,7 @@ export default function Home() {
   const GAP = 6;
   const LEFT_PADDING = 60;
   const MAX_VISIBLE_CANDLES = 20;
-  const wallet = useWallet();
+  const wallet = useEvmWallet();
   // animation refs
   const animatedMultiplierRef = useRef<number>(1.0);
   const animatedMinRef = useRef<number>(0.2);
@@ -78,7 +78,7 @@ export default function Home() {
         autoSellAmount &&
         targetMultiplierRef.current >= autoSellAmount &&
         myTrades?.trades.find((dt) => dt.buy !== 0 && !dt.sell) &&
-        wallet.publicKey
+        wallet.address
       ) {
         wsRef.current?.send(
           JSON.stringify({ type: "sell", userId, sell: sellPrice })
@@ -531,14 +531,14 @@ export default function Home() {
   useEffect(() => {
     if (typeof window === "undefined") return; // ensure browser only
 
-    if (wallet && wallet.publicKey) {
-      localStorage.setItem("userId", wallet.publicKey.toBase58());
-      setUserId(wallet.publicKey.toString());
+    if (wallet.address) {
+      localStorage.setItem("userId", wallet.address);
+      setUserId(wallet.address);
     } else {
       localStorage.setItem("userId", "guest");
       setUserId("guest");
     }
-  }, [wallet]); // runs when wallet changes
+  }, [wallet.address]); // runs when wallet changes
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -653,7 +653,7 @@ export default function Home() {
               {/* Chart */}
               <div className="relative w-full group">
                 <div className="absolute -top-3 left-4 z-10 bg-zinc-950 px-3 py-0.5 text-xs font-mono font-bold text-zinc-500 border-2 border-zinc-800 group-hover:border-yellow-400 group-hover:text-yellow-400 transition-colors">
-                  SOL/USD
+                  {TOKEN_DISPLAY.symbol}/USD
                 </div>
                 <div
                   ref={containerRef}
@@ -696,7 +696,7 @@ export default function Home() {
               isApplied={isApplied}
               setisApplied={setisApplied}
               wsRef={wsRef}
-              publicKey={wallet.publicKey?.toString()}
+              publicKey={wallet.address}
               gameState={gameState}
               currentMultiplierRef={animatedMultiplierRef}
               userHasBet={userHasBet}

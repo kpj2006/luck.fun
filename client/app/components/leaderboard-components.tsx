@@ -9,6 +9,7 @@ import {
   Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { BET_UNIT, TOKEN_DISPLAY } from "@/constants/constants";
 
 // --- Types ---
 export interface Trade {
@@ -58,16 +59,16 @@ const LeaderboardTable = ({ data }: { data: UserTrades[] }) => {
       if (trade.sell && trade.sell > 0) {
         // PnL = (multiplier * buy_amount) - buy_amount
         // Or simplified: buy_amount * (multiplier - 1)
-        pnlValue = trade.buy_amount * (trade.sell - 1);
+        pnlValue = (trade.buy_amount / BET_UNIT) * (trade.sell - 1);
         isWin = trade.sell > 1;
       }
 
       return {
         ...trade,
         user: userTrade.userId,
-        pnl: pnlValue.toFixed(2),
+        pnl: pnlValue.toFixed(4),
         isWin: isWin,
-        amount: trade.buy_amount.toLocaleString(),
+        amount: (trade.buy_amount / BET_UNIT).toFixed(4),
       };
     })
   );

@@ -5,10 +5,8 @@ import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { useWallet } from "@solana/wallet-adapter-react";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { Coins, Loader2 } from "lucide-react";
-import { MINT_TOKEN } from "@/constants/constants";
+import { CONTRACTS } from "@/constants/constants";
 import {
   addClaimRecord,
   FaucetRateStatus,
@@ -16,13 +14,15 @@ import {
   getRateStatus,
 } from "../components/rate-limit";
 import { toast } from "sonner";
-import { AirDropTokensToUser } from "@/server/server";
 import { FaucetTokenCard } from "../components/faucet-token-card";
 import { FaucetAmounts } from "../components/faucet-amounts";
+import { TOKENS } from "../components/tokens";
+import { useEvmWallet } from "../hooks/evmWallet";
+import { claimRugsFaucet, isUserRejection } from "@/lib/evm";
 
 export default function FaucetPage() {
-  const { publicKey, connected, connecting } = useWallet();
-  const [selectedMint, setSelectedMint] = useState<string>(MINT_TOKEN.mint);
+  const wallet = useEvmWallet();
+  const [selectedMint] = useState<string>(CONTRACTS.RUGS_TOKEN);
   const [selectedAmount, setSelectedAmount] = useState<number>(1);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [rate, setRate] = useState<FaucetRateStatus | null>(null);
@@ -30,27 +30,29 @@ export default function FaucetPage() {
     Array<{ mint: string; amount: number; ts: number; sig?: string }>
   >([]);
 
-  const selectedToken = MINT_TOKEN;
+  const selectedToken = TOKENS[0];
 
   // refresh rate + history when wallet changes
   useEffect(() => {
-    if (!publicKey) return;
+    const address = wallet.address;
+    if (!address) return;
 
     const fetchData = async () => {
-      const rateStatus = await getRateStatus(publicKey.toString());
-      const historyData = await getHistory(publicKey.toString());
+      const rateStatus = await getRateStatus(address);
+      const historyData = await getHistory(address);
       setRate(rateStatus);
       setHistory(historyData);
     };
 
     fetchData();
-  }, [publicKey]);
+  }, [wallet.address]);
 
   const refresh = async () => {
-    if (!publicKey) return;
+    const address = wallet.address;
+    if (!address) return;
 
-    const rateStatus = await getRateStatus(publicKey.toString());
-    const historyData = await getHistory(publicKey.toString());
+    const rateStatus = await getRateStatus(address);
+    const historyData = await getHistory(address);
     setRate(rateStatus);
     setHistory(historyData);
   };
@@ -60,12 +62,12 @@ export default function FaucetPage() {
   };
 
   const handleMint = async () => {
-    if (!publicKey) {
+    if (!wallet.address || !wallet.provider) {
       toast("Connect wallet");
       return;
     }
 
-    const status = await getRateStatus(publicKey.toString());
+    const status = await getRateStatus(wallet.address);
     if (!status.canClaim || selectedAmount > status.remaining) {
       toast("Rate limit reached");
       return;
@@ -75,17 +77,14 @@ export default function FaucetPage() {
 
     try {
       // Add Claim Record
-      const txSig = await AirDropTokensToUser(
-        publicKey.toString(),
-        selectedMint,
-        selectedAmount
-      );
+      const receipt = await claimRugsFaucet(wallet.provider);
+      const txSig = receipt?.hash ?? receipt?.transactionHash;
       console.log(txSig, "txSig");
       if (!txSig) {
         toast("Error occured while airdrop");
         return;
       }
-      addClaimRecord(publicKey.toString(), {
+      addClaimRecord(wallet.address, {
         mint: selectedMint,
         amount: selectedAmount,
         ts: Date.now(),
@@ -94,7 +93,12 @@ export default function FaucetPage() {
       toast("Airdrop successful! 🎉");
       refresh();
     } catch (e: any) {
-      toast("Airdrop failed");
+      if (isUserRejection(e)) {
+        toast.info("Transaction cancelled");
+        return;
+      }
+      console.error("Faucet Error:", e);
+      toast.error("Airdrop failed");
     } finally {
       setIsLoading(false);
     }
@@ -108,20 +112,19 @@ export default function FaucetPage() {
 
   const canMint = useMemo(() => {
     return (
-      publicKey &&
-      connected &&
+      wallet.address &&
       rate?.canClaim &&
       selectedAmount <= (rate?.remaining ?? 0) &&
       !isLoading
     );
-  }, [publicKey, connected, rate, selectedAmount, isLoading]);
+  }, [wallet.address, rate, selectedAmount, isLoading]);
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10 font-sans text-black">
       {/* Header */}
       <header className="mb-8 flex items-center justify-between">
         <h1 className="text-pretty text-2xl font-semibold text-white">
-          Devnet Token Faucet
+          Monad Testnet Faucet
         </h1>
         <Link href="/" className="text-sm underline">
           Back to app
@@ -132,21 +135,19 @@ export default function FaucetPage() {
       <Card className="mb-8 p-5 bg-black border-none">
         <div className="space-y-2">
           <p className="text-sm text-gray-400 ">
-            Welcome to our testing environment! This faucet provides free custom
-            tokens so you can explore and test our DeFi lending protocol without
-            any risk.
+            Welcome to our testing environment! This faucet provides free testnet
+            RUGS tokens so you can explore the crash game without any risk.
           </p>
           <ul className="list-disc pl-5 text-sm text-gray-400">
-            <li>Our lending protocol uses custom tokens for demonstration</li>
-            <li>You need these tokens to deposit, borrow, and trade</li>
-            <li>All transactions are on Solana devnet (no real value)</li>
-            <li>Perfect for learning DeFi concepts safely</li>
+            <li>Use RUGS to deposit and place bets</li>
+            <li>All transactions are on Monad testnet (no real value)</li>
+            <li>Perfect for testing the full gameplay loop safely</li>
           </ul>
           <ol className="list-decimal pl-5 text-sm text-gray-400">
-            <li>Connect your devnet wallet</li>
+            <li>Connect your EVM wallet</li>
             <li>Choose your desired token amount</li>
             <li>Airdrop tokens to your wallet</li>
-            <li>Start exploring our lending features!</li>
+            <li>Start playing the crash game</li>
           </ol>
         </div>
       </Card>
@@ -158,21 +159,27 @@ export default function FaucetPage() {
           <p className="text-sm text-gray-400">
             Status:{" "}
             <span className="font-medium ">
-              {connecting
+              {wallet.isConnecting
                 ? "Connecting"
-                : connected
-                ? "Connected"
-                : "Disconnected"}
+                : wallet.address
+                  ? "Connected"
+                  : "Disconnected"}
             </span>
           </p>
           <p className="break-all text-sm text-gray-400">
             Address:{" "}
             <span className="font-mono ">
-              {(publicKey && publicKey.toString()) || "Not connected"}
+              {wallet.address || "Not connected"}
             </span>
           </p>
           <div>
-            <WalletMultiButton />
+            <Button
+              onClick={wallet.connect}
+              disabled={wallet.isConnecting}
+              className="mt-2"
+            >
+              {wallet.isConnecting ? "Connecting..." : "Connect Wallet"}
+            </Button>
           </div>
         </Card>
         <Card className="p-4 bg-black border-none text-white">
@@ -201,7 +208,7 @@ export default function FaucetPage() {
       {/* Token cards */}
       <section className="mb-6 grid gap-4 md:grid-cols-2">
         {/* @ts-ignore */}
-        <FaucetTokenCard token={MINT_TOKEN} />
+        <FaucetTokenCard token={selectedToken} />
       </section>
 
       {/* Amount presets */}
@@ -210,7 +217,7 @@ export default function FaucetPage() {
           <h2 className="mb-4 text-sm font-medium">Choose Amount</h2>
           <FaucetAmounts
             remaining={rate?.remaining ?? 0}
-            disabled={!publicKey?.toString() || !(rate?.canClaim ?? false)}
+            disabled={!wallet.address || !(rate?.canClaim ?? false)}
             onPick={handleAmountSelect}
           />
         </Card>
@@ -250,13 +257,13 @@ export default function FaucetPage() {
               )}
             </Button>
 
-            {!canMint && publicKey && (
+            {!canMint && wallet.address && (
               <p className="text-xs text-gray-500 mt-2">
                 {!rate?.canClaim
                   ? "Rate limit reached. Please wait for reset."
                   : selectedAmount > (rate?.remaining ?? 0)
-                  ? `Not enough remaining tokens. You can claim ${rate?.remaining} more.`
-                  : ""}
+                    ? `Not enough remaining tokens. You can claim ${rate?.remaining} more.`
+                    : ""}
               </p>
             )}
           </div>
@@ -278,7 +285,7 @@ export default function FaucetPage() {
                   {new Date(h.ts).toLocaleString()}
                 </span>
                 <span className="font-medium ">
-                  +{h.amount} {MINT_TOKEN.symbol}
+                  +{h.amount} {selectedToken.symbol}
                 </span>
               </Card>
             ))}
