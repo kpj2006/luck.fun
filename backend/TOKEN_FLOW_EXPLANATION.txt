@@ -1,50 +1,59 @@
-RUGS.FUN - TOKEN FLOW EXPLANATION
-===================================
+# RUGS.FUN Token Flow & Accounting Architecture (Authoritative)
 
-This document explains exactly how RUGS tokens move between wallets and contracts
-during a live game cycle.
+## Core Principles
+1. **Solvency Invariant**: At all times, the Contract's physical ERC20 balance MUST be greater than or equal to the sum of all internal user balances (`balances[user]`).
+2. **Net Profit Only**: Only the platform's net profit (Losing Bets - Winning Payouts) should ever move to the Treasury. User principal must remain in the contract pool to back withdrawals.
 
-1. THE DEPOSIT (Actual Transfer - Wallet to Contract)
----------------------------------------------------
-When a player starts, they must deposit RUGS into the platform.
-- Action: User wallet sends ERC20 tokens to the 'RugsFun' contract address.
-- Result: User's wallet balance decreases; RugsFun contract balance increases.
-- Internal: The contract updates its mapping: balances[user] = amount.
+## Phase Breakdown
 
-2. THE GAME PLAY (Internal Accounting - No Gas Fees)
---------------------------------------------------
-During the game (Buy/Sell/Crash), tokens do NOT move between wallets. This
-ensures the game is fast and doesn't require gas for every single tick.
-- Buy: The 'RugsFun' contract decrements the user's internal balance number.
-- Win: The contract increments the user's internal balance number.
-- Loss: No action needed (the balance was already reduced during Buy).
+### 1. Deposit (Physical Move)
+*   **Action**: User Wallet ➔ RugsFun Contract.
+*   **Mechanism**: Standard ERC20 `transferFrom`.
+*   **Result**: 
+    *   Wallet balance decreases.
+    *   Contract address holds the physical tokens.
+    *   `balances[user]` (internal ledger) increases.
 
-3. THE SETTLEMENT (Actual Transfer - Pool to Treasury)
------------------------------------------------------
-When the platform takes its cut (Fees or Lost Bets), the tokens ACTUALLY move.
-- Action: The 'RugsFun' contract calls 'safeTransfer' to move tokens from
-  its pool into the 'Treasury' contract address.
-- Result: This is the "Platform Profit." These are real ERC20 tokens locked
-  in the Treasury vault.
+### 2. Gameplay (Internal Accounting)
+*   **Action**: Buy / Win / Loss.
+*   **Mechanism**: Simple variable updates in the contract/Supabase ledger.
+*   **Result**: 
+    *   **Buy**: `balances[user] -= bet`. The bet is now platform-controlled liquidity.
+    *   **Win**: `balances[user] += payout`.
+    *   **Loss**: No action (bet was already deducted at Buy).
+    *   **NO physical ERC20 transfers** occur during ticks to preserve speed and minimize gas.
 
-4. THE WITHDRAWAL (Actual Transfer - Contract to Wallet)
-------------------------------------------------------
-When a player wants their winnings back in their personal wallet.
-- Action: User calls 'withdraw'.
-- Result: The contract sends the physical ERC20 tokens from the contract
-  address back to the user's personal wallet address.
+### 3. End Game & Settlement (Economic Finality)
+*   **Action**: Finalizing the platform's cut.
+*   **Mechanism**: Calculate `Total Losers - Total Winners`.
+*   **Result**: 
+    *   If Winners > Losers: The contract uses its accumulated "Safety Buffer" or surplus to pay out.
+    *   If Losers > Winners: The **surplus (Net Profit)** is eligible for transfer to the Treasury.
+    *   **CRITICAL**: Do NOT transfer all tokens to the treasury after a game. Only move the surplus profit.
 
+### 4. Platform Payout (Surplus Sweep)
+*   **Action**: Contract ➔ Treasury.
+*   **Frequency**: Deferred (Daily/Weekly) or manual sweep.
+*   **Mechanism**: `transfer(treasury, contractBalance - sumUserBalances)`.
+*   *This ensures the contract never becomes insolvent.*
 
-SUMMARY TABLE
-=============
+### 5. Withdrawal (Physical Move)
+*   **Action**: RugsFun Contract ➔ User Wallet.
+*   **Mechanism**: Standard ERC20 `transfer`.
+*   **Result**: Physical tokens leave the contract pool and return to the user's personal control.
 
-| Action            | Actual Tokens Move? | Source ➔ Destination          |
-|-------------------|---------------------|-------------------------------|
-| Deposit           | YES                 | User Wallet ➔ Contract Pool   |
-| Play / Win / Loss | NO (Internal)       | Mapping Credit ➔ Mapping Debit |
-| Platform Fees     | YES                 | Contract Pool ➔ Treasury      |
-| Withdrawal        | YES                 | Contract Pool ➔ User Wallet   |
+---
+## Accounting Table
 
-===================================
-STATUS: FULLY VERIFIED ON MONAD TESTNET
-===================================
+| Action            | Physical Move? | Internal Ledger? | Flow Direction                 |
+|-------------------|----------------|------------------|--------------------------------|
+| **Deposit**       | YES            | YES              | User Wallet ➔ Contract Pool    |
+| **Buy / Bet**     | NO             | YES              | User Balance ➔ Pool Liquidity  |
+| **Win**           | NO             | YES              | Pool Liquidity ➔ User Balance  |
+| **Loss**          | NO             | NO               | (Already in Pool Liquidity)    |
+| **Treasury Sweep**| YES            | NO               | Contract Pool ➔ Treasury Wallet |
+| **Withdrawal**    | YES            | YES              | Contract Pool ➔ User Wallet    |
+
+---
+**STATUS**: AUTHORITATIVE SPECIFICATION
+**ENFORCED BY**: Backend Nano-Accounting & Solidity GameManager

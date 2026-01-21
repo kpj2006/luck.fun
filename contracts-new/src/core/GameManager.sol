@@ -214,12 +214,6 @@ contract GameManager is IGameManager, Ownable {
             }
             // If equal, do nothing.
 
-            // Transfer fees to treasury
-            if (fee > 0) {
-                rugsFun.collectFees(fee);
-                treasury.collectFees(fee);
-            }
-
             payout = netPayout;
         } else {
             // User Lost (Crashed)
@@ -227,10 +221,6 @@ contract GameManager is IGameManager, Ownable {
             
             // Debit full bet from user
             rugsFun.debitLoss(player, betAmount);
-            
-            // Transfer lost bet to treasury (platform wallet)
-            rugsFun.collectFees(betAmount);
-            treasury.collectFees(betAmount);
             
             payout = 0;
         }

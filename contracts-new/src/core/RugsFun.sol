@@ -49,6 +49,9 @@ contract RugsFun is IRugsFun, Ownable {
     /// @notice Address of the Game Manager contract
     address public gameManager;
 
+    /// @notice Address of the operator for treasury sweeps
+    address public operator;
+
     /// @notice Minimum deposit amount
     uint256 public minDeposit;
 
@@ -61,8 +64,9 @@ contract RugsFun is IRugsFun, Ownable {
     /// @notice Maximum withdrawal per transaction
     uint256 public maxWithdrawal;
 
-    /// @notice Total value locked in contract
-    uint256 public totalValueLocked;
+    /// @notice Total liabilities (sum of all internal user balances)
+    /// @dev This MUST be <= gameToken.balanceOf(address(this)) to ensure solvency
+    uint256 public totalUserBalances;
 
     // ============ Constructor ============
 
@@ -82,6 +86,7 @@ contract RugsFun is IRugsFun, Ownable {
 
         gameToken = IERC20(_gameToken);
         treasury = _treasury;
+        operator = _owner; // By default, owner is also the operator
 
         // Set default limits from constants
         minDeposit = Constants.MIN_DEPOSIT;
@@ -119,7 +124,7 @@ contract RugsFun is IRugsFun, Ownable {
         // Update balances
         balances[msg.sender] += amount;
         depositedBalances[msg.sender] += amount;
-        totalValueLocked += amount;
+        totalUserBalances += amount;
 
         emit Deposit(msg.sender, amount, balances[msg.sender]);
     }
@@ -160,7 +165,7 @@ contract RugsFun is IRugsFun, Ownable {
 
         // Update state after transfer
         balances[msg.sender] -= amount;
-        totalValueLocked -= amount;
+        totalUserBalances -= amount;
         dailyWithdrawals[msg.sender][today] += amount;
 
         emit Withdraw(msg.sender, amount, balances[msg.sender]);
@@ -208,10 +213,23 @@ contract RugsFun is IRugsFun, Ownable {
 
         gameManager = newGameManager;
 
-        // emit GameManagerUpdated(oldGameManager, newGameManager); 
-        // We need to add this event to Interface first if we want to emit it. 
-        // For now, let's skip event or assume it's added. 
+        // emit GameManagerUpdated(oldGameManager, newGameManager);
+        // We need to add this event to Interface first if we want to emit it.
+        // For now, let's skip event or assume it's added.
         // Let's rely on standard practice: defining event in Interface.
+    }
+
+    /**
+     * @notice Update operator address
+     * @param newOperator New operator address
+     */
+    function setOperator(address newOperator) external onlyOwner {
+        if (newOperator == address(0)) revert Errors.InvalidAddress(newOperator);
+        
+        address oldOperator = operator;
+        operator = newOperator;
+        
+        emit OperatorUpdated(oldOperator, newOperator);
     }
 
     /**
@@ -272,6 +290,13 @@ contract RugsFun is IRugsFun, Ownable {
     {
         return (minWithdrawal, maxWithdrawal);
     }
+
+    /**
+     * @notice Get total value locked (alias for backward compatibility)
+     */
+    function totalValueLocked() external view override returns (uint256) {
+        return totalUserBalances;
+    }
     // ============ Game Functions ============
 
     /**
@@ -290,16 +315,17 @@ contract RugsFun is IRugsFun, Ownable {
 
         // Update balance
         balances[user] += amount;
-        
+        totalUserBalances += amount;
+
         // We do NOT update depositedBalances as these are winnings, not fresh deposits.
         // But we DO update TVL since the contract now "owes" this money.
         // WAIT: TVL is usually "assets held". If we just credit a number, do we have the assets?
-        // Ideally, the Treasury or House pays this. 
+        // Ideally, the Treasury or House pays this.
         // If the contract holds the pool, then "crediting" means moving from "House Pool" to "User Balance".
         // Since this is a simplified model where the contract holds ALL funds, we just increase the user's claim.
         // We must ensure the contract actually HAS enough tokens to back this claim (solvency check).
         // For now, we assume the House (contract balance - user liabilities) is sufficient.
-        
+
         emit WinningsCredited(user, amount);
     }
     /**
@@ -315,7 +341,7 @@ contract RugsFun is IRugsFun, Ownable {
         }
 
         if (amount == 0) return;
-        
+
         uint256 currentBal = balances[user];
         if (currentBal < amount) {
             // Checks to ensure user cannot lose more than they have.
@@ -325,9 +351,10 @@ contract RugsFun is IRugsFun, Ownable {
 
         // Update balance
         balances[user] -= amount;
-        
+        totalUserBalances -= amount;
+
         // No change to depositedBalances (that tracks history)
-        
+
         emit LossDebited(user, amount);
     }
 
@@ -345,12 +372,40 @@ contract RugsFun is IRugsFun, Ownable {
         if (treasury == address(0)) revert Errors.InvalidAddress(treasury);
 
         // Update TVL as these tokens are leaving the game pool
-        if (totalValueLocked < amount) {
-            revert Errors.InsufficientBalance(totalValueLocked, amount);
+        if (gameToken.balanceOf(address(this)) < amount) { // Check actual contract balance
+            revert Errors.InsufficientBalance(gameToken.balanceOf(address(this)), amount);
         }
-        totalValueLocked -= amount;
+        // totalUserBalances is not directly affected by fees being collected,
+        // as fees are typically taken from the contract's "house" balance, not user liabilities.
+        // If fees were taken from user balances, totalUserBalances would decrease.
+        // Assuming fees are from the contract's surplus, totalUserBalances remains unchanged.
 
         // Transfer to treasury
         gameToken.safeTransfer(treasury, amount);
+        emit FeesCollected(amount);
+    }
+
+    /**
+     * @notice Transfer platform surplus (profit) to treasury
+     * @dev Only callable by operator or owner
+     */
+    function sweepSurplus() external override {
+        if (msg.sender != operator && msg.sender != owner()) {
+            revert Errors.Unauthorized(msg.sender);
+        }
+
+        uint256 currentTokenBalance = gameToken.balanceOf(address(this));
+
+        // Solvency Rule: Surplus = Assets - Liabilities
+        if (currentTokenBalance <= totalUserBalances) {
+            revert Errors.InsufficientBalance(currentTokenBalance, totalUserBalances);
+        }
+
+        uint256 surplus = currentTokenBalance - totalUserBalances;
+
+        if (surplus > 0) {
+            gameToken.safeTransfer(treasury, surplus);
+            emit TreasurySweep(surplus);
+        }
     }
 }

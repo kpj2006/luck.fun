@@ -45,7 +45,6 @@ contract LiveVerification is Script {
         }
 
         // 2. Deposit into Game
-        uint256 depositAmount = 100 * 10**18;
         if (token.balanceOf(player) >= depositAmount) {
             token.approve(address(rugsFun), depositAmount);
             rugsFun.deposit(depositAmount);

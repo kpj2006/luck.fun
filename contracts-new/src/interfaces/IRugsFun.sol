@@ -56,6 +56,19 @@ interface IRugsFun {
     /// @param amount Amount debited
     event LossDebited(address indexed user, uint256 amount);
 
+    /// @notice Emitted when platform profit is swept to treasury
+    /// @param amount Amount swept
+    event TreasurySweep(uint256 amount);
+
+    /// @notice Emitted when manual fees are collected
+    /// @param amount Amount collected
+    event FeesCollected(uint256 amount);
+
+    /// @notice Emitted when operator address is updated
+    /// @param oldOperator Previous operator address
+    /// @param newOperator New operator address
+    event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
+
     // ============ User Functions ============
     
     /// @notice Deposit tokens into the platform
@@ -79,6 +92,10 @@ interface IRugsFun {
     /// @notice Transfer collected fees to treasury
     /// @param amount Amount of tokens to transfer
     function collectFees(uint256 amount) external;
+
+    /// @notice Transfer platform surplus (profit) to treasury
+    /// @dev Only callable by operator
+    function sweepSurplus() external;
     
     /// @notice Get user's balance
     /// @param user Address of the user
@@ -100,6 +117,10 @@ interface IRugsFun {
     /// @notice Update game manager address
     /// @param newGameManager New game manager address
     function setGameManager(address newGameManager) external;
+    
+    /// @notice Update operator address
+    /// @param newOperator New operator address
+    function setOperator(address newOperator) external;
     
     /// @notice Update deposit limits
     /// @param minDeposit New minimum deposit amount
@@ -134,4 +155,8 @@ interface IRugsFun {
     /// @notice Get total value locked in contract
     /// @return Total TVL in tokens
     function totalValueLocked() external view returns (uint256);
+
+    /// @notice Get total liabilities (sum of all user balances)
+    /// @return Total liabilities in tokens
+    function totalUserBalances() external view returns (uint256);
 }

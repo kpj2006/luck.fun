@@ -5,7 +5,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "npx tsc -b && node dist/index.js",
-    "updatetype": "supabase gen types typescript --project-id apneajyhbpncbciasirk > src/types/supabase.ts"
+    "updatetype": "supabase gen types typescript --project-id apneajyhbpncbciasirk > src/types/supabase.ts",
+    "audit:solvency": "npx tsc -b && node dist/audit.js"
   },
   "author": "",
   "license": "ISC",

@@ -7,9 +7,9 @@ dotenv.config();
 // Contract addresses from deployment
 const CONTRACTS = {
   RUGS_TOKEN: "0x4297F610EF0E14E988494507dF51Fb2E396A9fF3",
-  RUGS_FUN: "0x64a1ab8072B0b912124739c150d5cD309B1797E1",
-  GAME_MANAGER: "0x8ed4C9D0DEB8e74d770712437d7731CA1975039e",
-  TREASURY: "0xe576A8Cdd8D805C780244D93d792564fDCf1A8a1",
+  RUGS_FUN: "0x3e52d90257fF7db1c0e300FD4c9EfBa4F0C233D3",
+  GAME_MANAGER: "0x279b095b1a44d1d91754359AA45725fb376185BE",
+  TREASURY: "0x6AaAbB7085076A46B2B6b8E98BEAb0CFC56Cf910",
 };
 
 // ABIs for contracts
@@ -18,8 +18,12 @@ const RUGS_FUN_ABI = [
   "function withdraw(uint256 amount) external",
   "function balances(address user) external view returns (uint256)",
   "function gameToken() external view returns (address)",
+  "function totalUserBalances() external view returns (uint256)",
+  "function sweepSurplus() external",
+  "function collectFees(uint256 amount) external",
+  "event TreasurySweep(uint256 amount)",
+  "event FeesCollected(uint256 amount)",
 ];
-
 const RUGS_TOKEN_ABI = [
   "function balanceOf(address account) external view returns (uint256)",
   "function approve(address spender, uint256 amount) external returns (bool)",
@@ -41,27 +45,58 @@ const provider = new ethers.JsonRpcProvider(
   {
     chainId: Number(process.env.CHAIN_ID) || 10143,
     name: "monad-testnet",
-    ensAddress: null as any, // Force-disable ENS for ethers v6
-  },
-  { 
-    staticNetwork: true,
-    batchMaxCount: 1,
-    pollingInterval: 6000,
   }
 );
 
 // Resilient request helper
-async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
+export async function withRetry<T>(fn: () => Promise<T>, retries = 5, baseDelay = 1000): Promise<T> {
   for (let i = 0; i < retries; i++) {
     try {
       return await fn();
     } catch (err) {
       if (i === retries - 1) throw err;
-      console.log(`⚠️ RPC lagging, retrying (${i + 1}/${retries})...`);
-      await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+      const delay = baseDelay * Math.pow(2, i);
+      console.log(`⚠️ RPC lagging, retrying (${i + 1}/${retries}) in ${delay}ms...`);
+      await new Promise(r => setTimeout(r, delay));
     }
   }
   throw new Error("Failed after retries");
+}
+
+// Timeout helper
+export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage = "Operation timed out"): Promise<T> {
+  let timeoutHandle: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    clearTimeout(timeoutHandle);
+    return result;
+  } catch (error) {
+    clearTimeout(timeoutHandle);
+    throw error;
+  }
+}
+
+// Wait for chain helper (non-blocking when used correctly)
+export async function waitForChain(): Promise<boolean> {
+  console.log("⏳ Waiting for RPC connectivity...");
+  let attempt = 0;
+  while (true) {
+    try {
+      // Use eth_chainId as the most reliable liveness check
+      await provider.send("eth_chainId", []);
+      console.log("✅ RPC connected and ready!");
+      return true;
+    } catch (err) {
+      attempt++;
+      const delay = Math.min(1000 * Math.pow(2, attempt), 30000); // Max 30s delay
+      console.error(`❌ RPC unreachable (Attempt ${attempt}). Retrying in ${delay}ms...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
 }
 
 const wallet = new ethers.Wallet(process.env.OPERATOR_PRIVATE_KEY!, provider);
@@ -86,40 +121,46 @@ export const gameManagerContract = new ethers.Contract(
 ) as any;
 
 // Helper functions
-export async function syncBalance(walletAddress: string): Promise<string> {
+export async function syncBalance(walletAddress: string): Promise<{ balance: string; balanceNano: string }> {
   if (!ethers.isAddress(walletAddress)) {
     throw new Error(`Invalid wallet address: ${walletAddress}`);
   }
   return await withRetry(async () => {
     const rawBalance = await rugsFunContract.balances(walletAddress);
     const balanceEth = ethers.formatEther(rawBalance);
+    // Convert 18 decimal Wei to 9 decimal Nano-RUGS
+    const balanceNano = rawBalance / 1000000000n;
 
     // Update Supabase users_rugsfun table
     const { error } = await supabase
       .from("users_rugsfun")
       .upsert({
         wallet_address: walletAddress,
-        balance: parseFloat(balanceEth)
+        balance_nano: balanceNano.toString(), // Store as integer string
+        balance: balanceEth as any // Keep legacy for now
       }, { onConflict: 'wallet_address' });
 
     if (error) {
       console.error("Error syncing balance to Supabase:", error);
     } else {
-      console.log(`Synced balance for ${walletAddress}: ${balanceEth} RUGS`);
+      console.log(`Synced balance for ${walletAddress}: ${balanceEth} RUGS (${balanceNano} nano)`);
     }
 
-    return balanceEth;
+    return { balance: balanceEth, balanceNano: balanceNano.toString() };
   });
 }
 
-export async function getPlayerBalance(walletAddress: string): Promise<string> {
+export async function getPlayerBalance(walletAddress: string): Promise<{ balance: string; balanceNano: string }> {
   if (!ethers.isAddress(walletAddress)) {
     throw new Error(`Invalid wallet address: ${walletAddress}`);
   }
   return await withRetry(async () => {
     // Read from contract directly for most up-to-date value
-    const balance = await rugsFunContract.balances(walletAddress);
-    return ethers.formatEther(balance);
+    const rawBalance = await rugsFunContract.balances(walletAddress);
+    return {
+      balance: ethers.formatEther(rawBalance),
+      balanceNano: (rawBalance / 1000000000n).toString()
+    };
   });
 }
 
@@ -170,7 +211,8 @@ export async function processWithdrawal(
 
     // Execute withdrawal - operator calls withdraw on behalf of user
     const tx = await rugsFunContract.withdraw(amountWei);
-    const receipt = await tx.wait();
+    // Use timeout for the wait, not retry
+    const receipt = (await withTimeout(tx.wait(), 30000, "Withdrawal transaction confirmation timed out")) as any;
 
     return {
       success: true,
@@ -191,7 +233,7 @@ export async function claimFaucet(walletAddress: string): Promise<{ success: boo
       return { success: false, error: "Invalid wallet address" };
     }
     const tx = await rugsTokenContract.claimFaucet();
-    const receipt = await tx.wait();
+    const receipt = (await withTimeout(tx.wait(), 30000, "Faucet transaction confirmation timed out")) as any;
     return { success: true, txHash: receipt?.hash };
   } catch (error: any) {
     console.error("Error claiming faucet:", error);
@@ -204,7 +246,7 @@ export async function claimFaucet(walletAddress: string): Promise<{ success: boo
 export async function onChainStartGame(gameId: number): Promise<{ success: boolean; txHash?: string }> {
   try {
     const tx = await gameManagerContract.startGame(gameId);
-    const receipt = await tx.wait();
+    const receipt = (await withTimeout(tx.wait(), 30000, "Start game transaction confirmation timed out")) as any;
     return { success: true, txHash: receipt?.hash };
   } catch (error: any) {
     console.error(`Error starting game ${gameId} on-chain:`, error);
@@ -221,6 +263,43 @@ export async function onChainEndGame(gameId: number, crashMultiplier: number): P
     return { success: true, txHash: receipt?.hash };
   } catch (error: any) {
     console.error(`Error ending game ${gameId} on-chain:`, error);
+    return { success: false };
+  }
+}
+
+export async function getContractSolvency(): Promise<{ assets: string; liabilities: string; surplus: string }> {
+  return await withRetry(async () => {
+    const assets = await rugsTokenContract.balanceOf(CONTRACTS.RUGS_FUN);
+    const liabilities = await rugsFunContract.totalUserBalances();
+    const surplus = assets > liabilities ? assets - liabilities : 0n;
+
+    return {
+      assets: ethers.formatEther(assets),
+      liabilities: ethers.formatEther(liabilities),
+      surplus: ethers.formatEther(surplus),
+    };
+  });
+}
+
+export async function executeTreasurySweep(): Promise<{ success: boolean; txHash?: string; amount?: string }> {
+  try {
+    const tx = await rugsFunContract.sweepSurplus();
+    const receipt = (await withTimeout(tx.wait(), 30000, "Treasury sweep confirmation timed out")) as any;
+
+    // Find TreasurySweep event
+    const sweepEvent = receipt.logs
+      .map((log: any) => {
+        try { return rugsFunContract.interface.parseLog(log); } catch { return null; }
+      })
+      .find((e: any) => e && e.name === "TreasurySweep");
+
+    return {
+      success: true,
+      txHash: receipt?.hash,
+      amount: sweepEvent ? ethers.formatEther(sweepEvent.args.amount) : "0"
+    };
+  } catch (error: any) {
+    console.error("Error executing treasury sweep:", error);
     return { success: false };
   }
 }
