@@ -1,14 +1,14 @@
 export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "10143");
 export const RPC_URL =
-  process.env.NEXT_PUBLIC_RPC_URL ?? "https://testnet-rpc.monad.xyz";
+  process.env.NEXT_PUBLIC_RPC_URL ?? "https://monad-testnet.g.alchemy.com/v2/2MhaA2rKxVwyufFUVZ1h-";
 export const WS_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ?? "ws://localhost:8080";
 
 export const CONTRACTS = {
   RUGS_TOKEN: "0x4297F610EF0E14E988494507dF51Fb2E396A9fF3",
-  RUGS_FUN: "0x64a1ab8072B0b912124739c150d5cD309B1797E1",
-  GAME_MANAGER: "0x8ed4C9D0DEB8e74d770712437d7731CA1975039e",
-  TREASURY: "0xe576A8Cdd8D805C780244D93d792564fDCf1A8a1",
+  RUGS_FUN: "0x3e52d90257fF7db1c0e300FD4c9EfBa4F0C233D3",
+  GAME_MANAGER: "0x279b095b1a44d1d91754359AA45725fb376185BE",
+  TREASURY: "0x6AaAbB7085076A46B2B6b8E98BEAb0CFC56Cf910",
 } as const;
 
 export const TOKEN_DISPLAY = {

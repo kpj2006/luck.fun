@@ -41,7 +41,7 @@ const GAME_MANAGER_ABI = [
 
 // Provider and wallet setup
 const provider = new ethers.JsonRpcProvider(
-  process.env.RPC_URL || "https://testnet-rpc.monad.xyz",
+  process.env.RPC_URL || "https://monad-testnet.g.alchemy.com/v2/2MhaA2rKxVwyufFUVZ1h-",
   {
     chainId: Number(process.env.CHAIN_ID) || 10143,
     name: "monad-testnet",
