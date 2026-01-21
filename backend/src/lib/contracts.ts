@@ -7,9 +7,9 @@ dotenv.config();
 // Contract addresses from deployment
 const CONTRACTS = {
   RUGS_TOKEN: "0x4297F610EF0E14E988494507dF51Fb2E396A9fF3",
-  RUGS_FUN: "0x3e52d90257fF7db1c0e300FD4c9EfBa4F0C233D3",
-  GAME_MANAGER: "0x279b095b1a44d1d91754359AA45725fb376185BE",
-  TREASURY: "0x6AaAbB7085076A46B2B6b8E98BEAb0CFC56Cf910",
+  RUGS_FUN: process.env.RUGS_FUN_ADDRESS || "0x497Efed09b7B193092EA50a1fffD5205a46A547c",
+  GAME_MANAGER: process.env.GAME_MANAGER_ADDRESS || "0x4F9859F8489CD0bB5b9Cc8dcAC952e4F4296f4A2",
+  TREASURY: process.env.TREASURY_ADDRESS || "0x14f432585D19dB2D1dc25996f345953384B2dE37",
 };
 
 // ABIs for contracts
@@ -37,6 +37,7 @@ const GAME_MANAGER_ABI = [
   "function settleTrade(uint256 gameId, address player, uint256 betAmount, uint256 cashoutMultiplier) external",
   "function currentGameId() external view returns (uint256)",
   "function gameActive() external view returns (bool)",
+  "function getGameResult(uint256 gameId) external view returns (tuple(uint256 gameId, uint256 startTime, uint256 endTime, uint256 crashMultiplier, uint256 totalVolume, uint256 playerCount, bool settled))",
 ];
 
 // Provider and wallet setup
@@ -256,7 +257,8 @@ export async function onChainStartGame(gameId: number): Promise<{ success: boole
 
 export async function onChainEndGame(gameId: number, crashMultiplier: number): Promise<{ success: boolean; txHash?: string }> {
   try {
-    // Multiplier is sent as an integer (e.g., 1.50 -> 150)
+    // Multiplier is sent as an integer (e.g., 1.50 -> 150, 0.96 -> 96)
+    // Contract now accepts MIN_MULTIPLIER = 0 (0.00x)
     const multiplierInt = Math.floor(crashMultiplier * 100);
     const tx = await gameManagerContract.endGame(gameId, multiplierInt);
     const receipt = await tx.wait();

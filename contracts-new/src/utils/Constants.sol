@@ -38,8 +38,8 @@ library Constants {
     /// @notice Maximum bet amount (100 tokens)
     uint256 public constant MAX_BET = 100 ether;
     
-    /// @notice Minimum multiplier (1.00x)
-    uint256 public constant MIN_MULTIPLIER = 100;
+    /// @notice Minimum multiplier (0.00x - allows instant crashes)
+    uint256 public constant MIN_MULTIPLIER = 0;
     
     /// @notice Maximum multiplier achievable (1000x)
     uint256 public constant MAX_MULTIPLIER = 100000;

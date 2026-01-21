@@ -88,9 +88,10 @@ export const NeoBetInterface: React.FC<NeoBetInterfaceProps> = ({
 
   const applyPreset = (preset: string) => {
     if (preset === "MAX") {
-      const maxVal = parseFloat(formattedBalance);
+      // Account for backend 1-nano buffer requirement
+      const maxVal = Math.max(0, parseFloat(formattedBalance) - 0.000000001);
       setAmount(maxVal);
-      setLocalAmountStr(maxVal.toString());
+      setLocalAmountStr(maxVal.toFixed(9)); // Show full precision
     } else if (preset === "X") {
       setAmount(0);
       setLocalAmountStr("");
@@ -126,11 +127,22 @@ export const NeoBetInterface: React.FC<NeoBetInterfaceProps> = ({
       return;
     }
 
+    // CRITICAL: Validate sufficient balance AND non-zero balance
+    const actualBalance = balance ?? 0;
+    if (actualBalance <= 0) {
+      toast.error(`No balance! Claim tokens from the faucet first.`);
+      return;
+    }
+    if (amount > actualBalance) {
+      toast.error(`Insufficient balance. You have ${formattedBalance} ${TOKEN_DISPLAY.symbol}`);
+      return;
+    }
+
     const rawMult = currentMultiplierRef
       ? currentMultiplierRef.current
       : currentMultiplier;
     const buyPrice = parseFloat(rawMult.toFixed(4));
-    const buyAmountUnits = Math.round(amount * BET_UNIT);
+    const buyAmountNano = Math.floor(amount * BET_UNIT);
 
     if (wsRef?.current) {
       wsRef.current.send(
@@ -138,14 +150,16 @@ export const NeoBetInterface: React.FC<NeoBetInterfaceProps> = ({
           type: "buy",
           userId: publicKey,
           buy: buyPrice,
-          buyAmount: buyAmountUnits,
+          buyAmount: amount, // Legacy field for compatibility
+          buyAmountNano: buyAmountNano.toString(), // High-precision nano units
         })
       );
     }
 
-    // Optimistic balance update
+    // Optimistic balance update (will be corrected by server response)
     if (balance !== undefined) {
-      setBalance(balance - amount);
+      const newBalance = Math.max(0, balance - amount);
+      setBalance(newBalance);
     }
 
     if (onTrade) onTrade();
@@ -171,12 +185,18 @@ export const NeoBetInterface: React.FC<NeoBetInterfaceProps> = ({
     toast.success(`Cashed out @ ${sellPrice}x 💰`);
   };
 
+  // Check if balance is effectively zero
+  const hasNoBalance = balance === null || balance === undefined || balance <= 0;
+  const insufficientForBet = amount > 0 && amount > (balance ?? 0);
+
   const isBuyDisabled =
     !publicKey ||
     publicKey === "guest" ||
     gameState === "CRASHED" ||
     gameState === "WAITING" ||
-    amount <= 0;
+    amount <= 0 ||
+    hasNoBalance ||
+    insufficientForBet;
   const isSellDisabled =
     !publicKey ||
     publicKey === "guest" ||
@@ -303,9 +323,13 @@ export const NeoBetInterface: React.FC<NeoBetInterfaceProps> = ({
                   : "bg-green-500 text-black hover:bg-green-400 border-green-700"
               )}
             >
-              {isBuyDisabled && gameState === "ACTIVE" ? (
+              {isBuyDisabled && gameState === "ACTIVE" && !hasNoBalance ? (
                 <>
                   Wait <Lock size={18} />
+                </>
+              ) : isBuyDisabled && hasNoBalance ? (
+                <>
+                  NO FUNDS <Wallet size={18} />
                 </>
               ) : (
                 <>

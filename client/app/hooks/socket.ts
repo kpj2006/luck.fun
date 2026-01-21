@@ -100,8 +100,8 @@ export default function useGameWebSocket() {
         if (data.type === "client-count") {
           setClientsConnected(data.count);
         }
-        // 🔁 Restore user trades on reconnect
-        if (data.type === "trade-restore" && data.userId === userId) {
+        // 🔁 Restore user trades on reconnect (case-insensitive address compare)
+        if (data.type === "trade-restore" && data.userId?.toLowerCase() === userId?.toLowerCase()) {
           setAllUserTrades((prev) => {
             const existing = prev.find((u) => u.userId === data.userId);
             if (existing) {
@@ -155,6 +155,8 @@ export default function useGameWebSocket() {
             setHistory([]);
             setAllUserTrades([]);
             historyRef.current = [];
+            // Refetch balance to ensure it's in sync after settlements
+            refetch();
           } else {
             setGameState("ACTIVE");
           }
@@ -167,18 +169,25 @@ export default function useGameWebSocket() {
 
         // 💹 Handle trade updates from server
         if (data.type === "trade-update") {
-          const { userId, trades, new_balance } = data;
+          const { userId: tradeUserId, trades, new_balance, new_balance_nano } = data;
           setAllUserTrades((prev) => {
-            const exists = prev.find((u) => u.userId === userId);
+            const exists = prev.find((u) => u.userId === tradeUserId);
             if (exists) {
               return prev.map((u) =>
-                u.userId === userId ? { userId, trades } : u
+                u.userId === tradeUserId ? { userId: tradeUserId, trades } : u
               );
             } else {
-              return [...prev, { userId, trades }];
+              return [...prev, { userId: tradeUserId, trades }];
             }
           });
-          setBalance(Number(new_balance));
+          // Update balance for the current user only (case-insensitive address compare)
+          if (tradeUserId?.toLowerCase() === userId?.toLowerCase()) {
+            const balanceToSet = new_balance_nano
+              ? Number(new_balance_nano) / 1_000_000_000 // Convert nano to RUGS
+              : Number(new_balance);
+            setBalance(balanceToSet);
+            console.log(`💰 Balance updated for ${userId}: ${balanceToSet} RUGS`);
+          }
         }
         if (data.type === "withdrawal-success") {
           toast.success(`Withdrawal successful! TX: ${data.txHash.slice(0, 10)}...`);

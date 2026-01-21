@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import dotenv from "dotenv";
 import { getPlayerBalance, processWithdrawal, onChainStartGame, onChainEndGame, onChainSettleTrade, getContractSolvency, executeTreasurySweep, gameManagerContract, syncBalance, waitForChain, withTimeout, withRetry } from "./lib/contracts";
 import { ethers } from "ethers";
+import { startReconciliationLoop } from "./reconciliation";
 interface Trade {
   id: number;
   gameId: number;
@@ -166,55 +167,45 @@ const startGame = async () => {
           if (endGameRes && endGameRes.success) {
             endGameConfirmed = true; // Gate unlocked
             console.log(`✅ Game ${gameId} finalized on-chain. Proceeding with settlements.`);
+
+            // NO SUPABASE UPDATE HERE - Reconciliation will handle it asynchronously
+
           } else {
-            console.warn(`⚠️ EndGame attempt failed for Game ${gameId}. Deferring settlements.`);
+            console.warn(`⚠️ EndGame attempt failed for Game ${gameId}. Deferring to reconciliation.`);
             return; // ❗ DO NOT SETTLE if on-chain state isn't ready
           }
 
-          // 1.5 Settle ALL Trades (Guarded and Selective)
-          console.log(`🏦 Starting settlements for Game ${gameId}...`);
-          for (const user of users) {
-            const activeTrade = user.trades.find((t) => t.gameId === gameId);
-            if (activeTrade && !activeTrade.settled && endGameConfirmed) { // Double check gate
-              const cashoutMultiplier = activeTrade.sell || 0;
+          // 2. Settle ALL Trades On-Chain (Winners AND Losers)
+          console.log(`🏦 Starting on-chain settlements for Game ${gameId}...`);
 
-              // Non-blocking settlement for winners only
-              if (cashoutMultiplier > 0) {
-                console.log(`🏦 On-chain settling Game ${gameId} for ${user.userId} (Mult: ${cashoutMultiplier})`);
-                withTimeout(
-                  onChainSettleTrade(
-                    gameId,
-                    user.userId,
-                    activeTrade.buy_amount.toString(),
-                    cashoutMultiplier
-                  ),
-                  30000,
-                  `Settlement for ${user.userId} timed out`
-                ).then(async (settleRes) => {
-                  if (settleRes.success) {
-                    activeTrade.settled = true; // Mark only on success
-                    if (ethers.isAddress(user.userId)) {
-                      const { balance, balanceNano } = await syncBalance(user.userId);
-                      // Final trade update broadcast
-                      if (user.socket && user.socket.readyState === WebSocket.OPEN) {
-                        user.socket.send(JSON.stringify({
-                          type: "trade-update",
-                          userId: user.userId,
-                          trades: user.trades,
-                          new_balance: balance,
-                          new_balance_nano: balanceNano,
-                        }));
-                      }
-                    }
-                  }
-                }).catch(err => {
-                  console.error(`❌ Failed/Timed out to settle trade for ${user.userId}:`, err);
-                });
-              } else {
+          const settlementPromises = users.map(async (user) => {
+            const activeTrade = user.trades.find((t) => t.gameId === gameId);
+            if (!activeTrade || activeTrade.settled || !endGameConfirmed) return;
+
+            const cashoutMultiplier = activeTrade.sell || 0;
+
+            try {
+              // Settle on-chain (both winners and losers)
+              console.log(`🏦 Settling Game ${gameId} for ${user.userId} (Cashout: ${cashoutMultiplier})`);
+
+              const settleRes = await withTimeout(
+                onChainSettleTrade(
+                  gameId,
+                  user.userId,
+                  activeTrade.buy_amount.toString(),
+                  cashoutMultiplier
+                ),
+                30000,
+                `Settlement for ${user.userId} timed out`
+              );
+
+              if (settleRes.success) {
                 activeTrade.settled = true;
-                console.log(`📉 Game ${gameId}: Skipping on-chain settlement for ${user.userId} (Loser)`);
-                // Still notify user of their finalized status
-                getPlayerBalance(user.userId).then(({ balance, balanceNano }) => {
+
+                // 3. Sync balance from contract and update UI immediately
+                if (ethers.isAddress(user.userId)) {
+                  const { balance, balanceNano } = await syncBalance(user.userId);
+
                   if (user.socket && user.socket.readyState === WebSocket.OPEN) {
                     user.socket.send(JSON.stringify({
                       type: "trade-update",
@@ -224,14 +215,22 @@ const startGame = async () => {
                       new_balance_nano: balanceNano,
                     }));
                   }
-                });
+                }
               }
+            } catch (err) {
+              console.error(`❌ Settlement failed for ${user.userId}:`, err);
             }
-          }
+          });
+
+          // Wait for all settlements to complete before moving on
+          await Promise.allSettled(settlementPromises);
+          console.log(`✅ All settlements processed for Game ${gameId}`);
         })
         .catch(err => {
-          console.warn(`⚠️ EndGame attempt failed for Game ${gameId}:`, err.message);
-          // ❗ DO NOTHING ELSE — never crash, never settle
+          console.error(`❌ EndGame failed for Game ${gameId}:`, err.message);
+          console.error(`   Reason: ${err.reason || 'Unknown'}`);
+          console.error(`   Code: ${err.code || 'N/A'}`);
+          // ❗ DO NOTHING ELSE — never crash, never settle, never update DB
         });
 
       // Save finished game to history
@@ -245,23 +244,8 @@ const startGame = async () => {
       if (previousGames.length > 10) {
         previousGames.shift();
       }
-      const total_volume = currentGameTicks
-        .map((data) => data.value)
-        .reduce((acc, val) => acc + val, 0);
       currentGameTicks = [];
 
-      // Update off chain ledger
-      supabase
-        .from("games_rugs_fun")
-        .update({
-          crash_multiplier: currentMultiplier,
-          total_volume: total_volume,
-        })
-        .eq("game_id", gameId.toString())
-        .then(({ error }) => {
-          if (error) console.error("❌ Error updating game in Supabase:", error);
-          else console.log("✅ Game result updated in Supabase.");
-        });
       broadcast({
         type: "tick",
         multiplier: currentMultiplier,
@@ -616,6 +600,8 @@ const initServer = async () => {
   // Non-blocking chain wait
   waitForChain().then(() => {
     startGame();
+    // Start reconciliation loop after chain is ready
+    startReconciliationLoop();
   }).catch(err => {
     console.error("❌ Fatal: Failed to establish chain connectivity", err);
   });
