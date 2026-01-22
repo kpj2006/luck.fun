@@ -17,6 +17,8 @@ import { NeoBetInterface } from "./components/control-panel"; // Updated
 import { cn } from "@/lib/utils";
 import NeoNavbar from "./components/navbar";
 import { TOKEN_DISPLAY } from "@/constants/constants";
+import { ConnectionStatus } from "./components/connection-status";
+import { DebugPanel } from "./components/debug-panel";
 
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -49,6 +51,7 @@ export default function Home() {
     latency,
     globalChats,
     setGlobalChats,
+    connectionState,
   } = useGameWebSocket();
 
   const { balance, setBalance, refetch, isApplied, setisApplied } =
@@ -585,6 +588,8 @@ export default function Home() {
 
   return (
     <div className="h-screen bg-zinc-950 font-sans text-zinc-200 selection:bg-yellow-400 selection:text-black flex flex-col overflow-hidden ">
+      <ConnectionStatus wsState={connectionState} />
+      <DebugPanel />
       <NeoNavbar />
       {/* 2. MAIN LAYOUT (Sidebar + Content) */}
       <div className="flex-1 flex overflow-hidden">

@@ -33,7 +33,14 @@ interface GameHistory {
   ticks: GameTick[];
 }
 
-const wss = new WebSocketServer({ port: 8080 });
+// Use port 8081 since 8080 is in use by Apache
+const PORT = process.env.PORT || 8081;
+
+// Listen on all interfaces (0.0.0.0) to accept connections from mobile devices
+const wss = new WebSocketServer({ 
+  port: Number(PORT),
+  host: '0.0.0.0' // This allows connections from any IP on your network
+});
 
 let tickGenerator: ReturnType<typeof createTickGenerator>;
 let currentMultiplier = 1.0;
@@ -273,7 +280,7 @@ const startGame = async () => {
         data: previousGames,
       });
 
-      // 2️⃣ Wait 2 seconds before starting WAITING timer
+      // 2️⃣ Wait 15 seconds before starting WAITING timer
       setTimeout(() => {
         timer = 8;
         timerInterval = setInterval(() => {
@@ -290,7 +297,7 @@ const startGame = async () => {
             startGame(); // start new game
           }
         }, 1000);
-      }, 2000);
+      }, 15000);
     }
   }, 500);
 };
@@ -609,9 +616,11 @@ wss.on("connection", (ws) => {
 
 // --- Initialize Server ---
 const initServer = async () => {
-  console.log(
-    `✅ WebSocket server running on ${process.env.CLIENT_URL ?? "ws://localhost:8080"} `
-  );
+  const host = '0.0.0.0';
+  
+  console.log(`✅ WebSocket server running on ${host}:${PORT}`);
+  console.log(`📱 Mobile access: Use ws://YOUR-LOCAL-IP:${PORT}`);
+  console.log(`💻 Desktop access: Use ws://localhost:${PORT}`);
 
   // Non-blocking chain wait
   waitForChain().then(() => {

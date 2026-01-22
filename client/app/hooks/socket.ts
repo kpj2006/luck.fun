@@ -1,10 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { WS_URL } from "@/constants/constants";
+import { getWebSocketUrl } from "@/constants/constants";
 import { useUserInformation } from "./userInfo";
 import { toast } from "sonner";
 
+const MAX_RECONNECT_ATTEMPTS = 3;
+const RECONNECT_DELAY = 5000; // 5 seconds
+
 export default function useGameWebSocket() {
   const [userId, setUserId] = useState<string | null>(null);
+  const [connectionState, setConnectionState] = useState<"connecting" | "connected" | "disconnected" | "error">("connecting");
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const [gameState, setGameState] = useState<"WAITING" | "ACTIVE" | "CRASHED">(
     "WAITING"
@@ -59,20 +65,43 @@ export default function useGameWebSocket() {
     const storedId = localStorage.getItem("userId") || "guest";
     setUserId(storedId);
   }, []);
-  const url = WS_URL;
+  
   // --------------------------------------------------
   // 🧩 WebSocket Connection
   // --------------------------------------------------
   useEffect(() => {
     if (!userId) return;
 
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
+    // Get WebSocket URL dynamically (client-side only)
+    const url = getWebSocketUrl();
+
+    // Clear any pending reconnection attempts
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
+    console.log("Attempting to connect to:", url);
+    setConnectionState("connecting");
+
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(url);
+      wsRef.current = ws;
+    } catch (error) {
+      console.error("Failed to create WebSocket:", error);
+      setConnectionState("error");
+      toast.error("Cannot connect to server. Please check your network.");
+      return;
+    }
 
     ws.onopen = () => {
       console.log("✅ Connected to WS");
+      setConnectionState("connected");
+      reconnectAttemptsRef.current = 0; // Reset on successful connection
       ws.send(JSON.stringify({ type: "identify", userId }));
       console.log("Sent identification:", userId);
+      toast.success("Connected to server");
     };
 
     ws.onmessage = (event) => {
@@ -194,16 +223,56 @@ export default function useGameWebSocket() {
 
     ws.onerror = (err) => {
       console.error("⚠️ WS error:", err);
-      setGameState("CRASHED");
+      setConnectionState("error");
+      
+      // Don't spam toasts
+      if (reconnectAttemptsRef.current === 0) {
+        toast.error(`Cannot connect to backend at ${url}. Make sure it's running.`);
+      }
     };
 
-    ws.onclose = () => {
-      console.log("🔴 WS closed");
-      setGameState((s) => (s === "ACTIVE" ? "CRASHED" : s));
+    ws.onclose = (event) => {
+      console.log("🔴 WS closed", event.code, event.reason);
+      setConnectionState("disconnected");
+      
+      // Only set to CRASHED if game was actually active
+      if (gameState === "ACTIVE") {
+        setGameState("CRASHED");
+      }
+      
+      // Normal closure (1000) - don't reconnect
+      if (event.code === 1000) {
+        console.log("Normal WebSocket closure");
+        return;
+      }
+      
+      // Check reconnection attempts
+      if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+        reconnectAttemptsRef.current++;
+        console.log(`Reconnection attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS}`);
+        
+        toast.info(`Reconnecting... (${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
+        
+        // Schedule reconnection
+        reconnectTimeoutRef.current = setTimeout(() => {
+          // Trigger re-render to reconnect
+          setUserId(userId);
+        }, RECONNECT_DELAY);
+      } else {
+        toast.error("Could not connect to server. Please refresh the page or check if backend is running.", {
+          duration: 10000,
+        });
+      }
     };
 
     return () => {
-      ws.close();
+      // Clean up
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close(1000, "Component unmounting");
+      }
     };
   }, [userId]);
 
@@ -220,6 +289,7 @@ export default function useGameWebSocket() {
     userId,
     latency,
     globalChats,
+    connectionState,
     setUserId,
     setGlobalChats,
     setGameState,

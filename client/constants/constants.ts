@@ -1,8 +1,40 @@
 export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "10143");
 export const RPC_URL =
   process.env.NEXT_PUBLIC_RPC_URL ?? "https://monad-testnet.g.alchemy.com/v2/2MhaA2rKxVwyufFUVZ1h-";
-export const WS_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL ?? "ws://localhost:8080";
+
+// Dynamic WebSocket URL that works on both desktop and mobile
+export const getWebSocketUrl = () => {
+  // Server-side rendering fallback
+  if (typeof window === 'undefined') {
+    return 'ws://localhost:8081';
+  }
+  
+  // If environment variable is set, use it
+  if (process.env.NEXT_PUBLIC_BACKEND_URL) {
+    const url = process.env.NEXT_PUBLIC_BACKEND_URL;
+    console.log('Using env BACKEND_URL:', url);
+    return url;
+  }
+  
+  // Get current hostname from browser
+  const hostname = window.location.hostname;
+  console.log('Current hostname:', hostname);
+  
+  // For localhost access
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    const url = 'ws://localhost:8081';
+    console.log('Using localhost URL:', url);
+    return url;
+  }
+  
+  // For mobile access via local IP, use same host with port 8081
+  const url = `ws://${hostname}:8081`;
+  console.log('Using dynamic URL:', url);
+  return url;
+};
+
+// Legacy export for backward compatibility
+export const WS_URL = getWebSocketUrl();
 
 export const CONTRACTS = {
   RUGS_TOKEN: "0x4297F610EF0E14E988494507dF51Fb2E396A9fF3",

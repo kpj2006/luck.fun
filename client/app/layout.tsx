@@ -4,6 +4,7 @@ import "./globals.css";
 import AppProvider from "./AppProvider";
 import { Toaster } from "sonner";
 import { Analytics } from "@vercel/analytics/next";
+import { PWAInstallPrompt } from "./components/pwa-install-prompt";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -33,6 +34,18 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: "rugs.fun", url: "" }],
   creator: "rugs.fun",
+  manifest: "/manifest.json",
+  viewport: {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 5,
+    userScalable: true,
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Rugs.fun",
+  },
   openGraph: {
     title: "rugs.fun – On-chain Trading Game for Degens",
     description:
@@ -75,6 +88,7 @@ export default function RootLayout({
       >
         <AppProvider>
           {children}
+          <PWAInstallPrompt />
           <Toaster />
           <Analytics />
         </AppProvider>

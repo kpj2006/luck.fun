@@ -167,3 +167,51 @@
 .animate-fade-in {
   animation: fade-in 0.3s ease-out;
 }
+
+/* ==== Mobile Optimization ==== */
+@media (max-width: 768px) {
+  /* Improve touch targets */
+  button, a, [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Better spacing on mobile */
+  body {
+    font-size: 16px; /* Prevents zoom on input focus */
+  }
+  
+  /* Optimize text for mobile */
+  h1 {
+    font-size: 1.75rem;
+  }
+  
+  h2 {
+    font-size: 1.5rem;
+  }
+  
+  /* Prevent horizontal scroll */
+  html, body {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+  
+  /* Better input on mobile */
+  input, textarea, select {
+    font-size: 16px; /* Prevents iOS zoom */
+  }
+  
+  /* Improve scrolling on mobile */
+  * {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* PWA specific styles */
+@media (display-mode: standalone) {
+  /* Styles when app is installed as PWA */
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
