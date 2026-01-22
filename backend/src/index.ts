@@ -303,8 +303,10 @@ const startGame = async () => {
 };
 
 // --- WebSocket Connection ---
-wss.on("connection", (ws) => {
-  console.log("🟢 New client connected");
+wss.on("connection", (ws, req) => {
+  const clientIp = req.socket.remoteAddress;
+  console.log(`🟢 NEW CLIENT CONNECTED from ${clientIp}`);
+  console.log(`   Total clients: ${wss.clients.size}`);
 
   broadcast({
     type: "global-chat",
@@ -611,16 +613,25 @@ wss.on("connection", (ws) => {
     }
   });
 
-  ws.on("close", () => console.log("🔴 Client disconnected"));
+  ws.on("close", () => {
+    console.log(`🔴 CLIENT DISCONNECTED (${clientIp})`);
+    console.log(`   Remaining clients: ${wss.clients.size}`);
+  });
 });
 
 // --- Initialize Server ---
 const initServer = async () => {
   const host = '0.0.0.0';
   
-  console.log(`✅ WebSocket server running on ${host}:${PORT}`);
-  console.log(`📱 Mobile access: Use ws://YOUR-LOCAL-IP:${PORT}`);
-  console.log(`💻 Desktop access: Use ws://localhost:${PORT}`);
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`✅ WEBSOCKET SERVER RUNNING`);
+  console.log(`${'='.repeat(60)}`);
+  console.log(`🌐 Host: ${host}`);
+  console.log(`🔌 Port: ${PORT}`);
+  console.log(`📱 Mobile: ws://YOUR-LOCAL-IP:${PORT}`);
+  console.log(`💻 Local: ws://localhost:${PORT}`);
+  console.log(`🚀 Railway TCP Proxy: Check Railway dashboard for wss:// URL`);
+  console.log(`${'='.repeat(60)}\n`);
 
   // Non-blocking chain wait
   waitForChain().then(() => {
