@@ -510,22 +510,28 @@ wss.on("connection", (ws, req) => {
 
         // 🔥 FIRST BET → Start game on-chain now
         if (!isOnChainGame) {
-          console.log(`🎯 First bet detected! Starting Game ${gameId} on-chain...`);
+          console.log(`🎯 First bet detected! Getting on-chain game ID...`);
           try {
-            const onChainId = await withRetry(() => gameManagerContract.currentGameId());
+            let onChainId = await withRetry(() => gameManagerContract.currentGameId());
             const onChainGameActive = await gameManagerContract.gameActive();
             
             if (onChainGameActive) {
-              console.warn(`⚠️ Game already active on-chain, force-ending first...`);
+              console.warn(`⚠️ Game ${onChainId} already active on-chain, force-ending first...`);
               await onChainEndGame(Number(onChainId), 1.0).catch(() => {});
+              // Get new game ID after force-end
+              onChainId = await withRetry(() => gameManagerContract.currentGameId());
             }
+            
+            // Use the on-chain game ID, not our local counter
+            gameId = Number(onChainId);
+            console.log(`📡 Starting Game ${gameId} on-chain...`);
             
             const startRes = await onChainStartGame(gameId);
             if (startRes.success) {
               isOnChainGame = true;
               console.log(`✅ Game ${gameId} now active on-chain!`);
             } else {
-              console.error(`❌ Failed to start on-chain, continuing off-chain only`);
+              console.error(`❌ Failed to start on-chain, continuing off-chain with local ID`);
             }
           } catch (err) {
             console.error(`❌ Error starting on-chain:`, err);
