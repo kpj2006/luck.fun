@@ -171,77 +171,19 @@ const startGame = async () => {
         user.trades.some(trade => trade.gameId === gameId)
       );
 
-      if (!hasActiveTrades) {
-        console.log(`⏭️  Game ${gameId} had no players - skipping on-chain execution`);
-        endGameConfirmed = false; // No need for settlements
-        
-        // Still update Supabase and broadcast crash
-        const total_volume = currentGameTicks
-          .map((data) => data.value)
-          .reduce((acc, val) => acc + val, 0);
-        
-        supabase
-          .from("games_rugs_fun")
-          .update({
-            crash_multiplier: currentMultiplier,
-            total_volume: total_volume,
-          })
-          .eq("game_id", gameId.toString())
-          .then(({ error }) => {
-            if (error) console.error("❌ Error updating game in Supabase:", error);
-            else console.log("✅ Game result updated in Supabase (no players).");
-          });
-
-        // Add to history
-        previousGames.push({
-          id: Date.now(),
-          crashedAt: currentMultiplier,
-          ticks: currentGameTicks,
-        });
-        if (previousGames.length > 10) {
-          previousGames.shift();
-        }
-        currentGameTicks = [];
-
-        broadcast({
-          type: "tick",
-          multiplier: currentMultiplier,
-          state: "CRASHED",
-          timer: 0,
-        });
-        broadcast({
-          type: "prev-game",
-          data: previousGames,
-        });
-
-        // Start next game after delay (match normal game flow)
-        setTimeout(() => {
-          timer = 8;
-          timerInterval = setInterval(() => {
-            broadcast({
-              type: "tick",
-              multiplier: currentMultiplier,
-              state: "WAITING",
-              timer,
-            });
-            timer--;
-
-            if (timer < 0) {
-              clearInterval(timerInterval);
-              startGame();
-            }
-          }, 1000);
-        }, 15000);
-        return; // Exit early - no blockchain interaction needed
-      }
-
-      // 1. End Game On-Chain and WAIT for it (so settlements are valid)
-      console.log(`📡 Finalizing Game ${gameId} on-chain before settlement (${users.filter(u => u.trades.some(t => t.gameId === gameId)).length} players)...`);
+      // Always END game on-chain (to increment game ID), but skip settlements if no players
+      console.log(`📡 Finalizing Game ${gameId} on-chain... ${hasActiveTrades ? `(${users.filter(u => u.trades.some(t => t.gameId === gameId)).length} players)` : '(no players - will skip settlements)'}`);
       withTimeout(onChainEndGame(gameId, currentMultiplier), 30000, "End Game On-Chain Timed Out")
         .then(async (endGameRes) => {
           if (endGameRes && endGameRes.success) {
             endGameConfirmed = true; // Gate unlocked
-            console.log(`✅ Game ${gameId} finalized on-chain. Proceeding with settlements.`);
+            console.log(`✅ Game ${gameId} finalized on-chain.`);
+            
+            // Only settle trades if there were players
+            if (!hasActiveTrades) {
+              console.log(`⏭️  No players - skipping settlements`);
+              return; // Skip settlement loop
+            }
           } else {
             console.warn(`⚠️ EndGame attempt failed for Game ${gameId}. Deferring settlements.`);
             return; // ❗ DO NOT SETTLE if on-chain state isn't ready
