@@ -65,7 +65,7 @@ export default function useGameWebSocket() {
     const storedId = localStorage.getItem("userId") || "guest";
     setUserId(storedId);
   }, []);
-  
+
   // --------------------------------------------------
   // 🧩 WebSocket Connection
   // --------------------------------------------------
@@ -129,13 +129,13 @@ export default function useGameWebSocket() {
         if (data.type === "client-count") {
           setClientsConnected(data.count);
         }
-        // 🔁 Restore user trades on reconnect
-        if (data.type === "trade-restore" && data.userId === userId) {
+        // 🔁 Restore user trades on reconnect (case-insensitive for EVM addresses)
+        if (data.type === "trade-restore" && data.userId?.toLowerCase() === userId?.toLowerCase()) {
           setAllUserTrades((prev) => {
-            const existing = prev.find((u) => u.userId === data.userId);
+            const existing = prev.find((u) => u.userId?.toLowerCase() === data.userId?.toLowerCase());
             if (existing) {
               return prev.map((u) =>
-                u.userId === data.userId ? { ...u, trades: data.trades } : u
+                u.userId?.toLowerCase() === data.userId?.toLowerCase() ? { ...u, trades: data.trades } : u
               );
             } else {
               return [...prev, data];
@@ -194,17 +194,18 @@ export default function useGameWebSocket() {
           setHistory([...historyRef.current]);
         }
 
-        // 💹 Handle trade updates from server
+        // 💹 Handle trade updates from server (case-insensitive for EVM addresses)
         if (data.type === "trade-update") {
-          const { userId, trades, new_balance } = data;
+          console.log(`[DEBUG] Received trade-update:`, data);
+          const { userId: tradeUserId, trades, new_balance } = data;
           setAllUserTrades((prev) => {
-            const exists = prev.find((u) => u.userId === userId);
+            const exists = prev.find((u) => u.userId?.toLowerCase() === tradeUserId?.toLowerCase());
             if (exists) {
               return prev.map((u) =>
-                u.userId === userId ? { userId, trades } : u
+                u.userId?.toLowerCase() === tradeUserId?.toLowerCase() ? { userId: tradeUserId, trades } : u
               );
             } else {
-              return [...prev, { userId, trades }];
+              return [...prev, { userId: tradeUserId, trades }];
             }
           });
           setBalance(Number(new_balance));
@@ -224,7 +225,7 @@ export default function useGameWebSocket() {
     ws.onerror = (err) => {
       console.error("⚠️ WS error:", err);
       setConnectionState("error");
-      
+
       // Don't spam toasts
       if (reconnectAttemptsRef.current === 0) {
         toast.error(`Cannot connect to backend at ${url}. Make sure it's running.`);
@@ -234,25 +235,25 @@ export default function useGameWebSocket() {
     ws.onclose = (event) => {
       console.log("🔴 WS closed", event.code, event.reason);
       setConnectionState("disconnected");
-      
+
       // Only set to CRASHED if game was actually active
       if (gameState === "ACTIVE") {
         setGameState("CRASHED");
       }
-      
+
       // Normal closure (1000) - don't reconnect
       if (event.code === 1000) {
         console.log("Normal WebSocket closure");
         return;
       }
-      
+
       // Check reconnection attempts
       if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
         reconnectAttemptsRef.current++;
         console.log(`Reconnection attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS}`);
-        
+
         toast.info(`Reconnecting... (${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
-        
+
         // Schedule reconnection
         reconnectTimeoutRef.current = setTimeout(() => {
           // Trigger re-render to reconnect

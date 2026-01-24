@@ -37,7 +37,7 @@ interface GameHistory {
 const PORT = process.env.PORT || 8081;
 
 // Listen on all interfaces (0.0.0.0) to accept connections from mobile devices
-const wss = new WebSocketServer({ 
+const wss = new WebSocketServer({
   port: Number(PORT),
   host: '0.0.0.0' // This allows connections from any IP on your network
 });
@@ -52,6 +52,7 @@ let gameId: any;
 let localGameCounter = 1000; // Local counter for off-chain games
 let isOnChainGame = false; // Track if current game is on-chain
 let endGameConfirmed = false; // New gate for settlements
+let onChainStartPromise: Promise<boolean> | null = null; // Track when on-chain start completes
 
 let users: User[] = [];
 let currentGameTicks: GameTick[] = [];
@@ -87,14 +88,15 @@ const startGame = async () => {
   currentGameTicks = [];
   endGameConfirmed = false;
   isOnChainGame = false; // Start as off-chain
+  onChainStartPromise = null; // Reset promise for new game
   users = []; // Reset users for new game
 
   // Use local counter for off-chain games
   gameId = localGameCounter++;
   gameState = "ACTIVE"; // Start immediately without blockchain
-  
+
   console.log(`🎮 Game ${gameId} starting OFF-CHAIN (no blockchain until someone bets)`);
-  
+
   // Register in Supabase
   const { error: sbError } = await supabase
     .from("games_rugs_fun")
@@ -128,19 +130,19 @@ const startGame = async () => {
       console.log(`💥Game crashed at multiplier: ${currentMultiplier}`);
 
       // Check if anyone actually played in this game
-      const hasActiveTrades = users.some(user => 
+      const hasActiveTrades = users.some(user =>
         user.trades.some(trade => trade.gameId === gameId)
       );
 
       if (!hasActiveTrades || !isOnChainGame) {
         console.log(`⏭️  Game ${gameId} ${!hasActiveTrades ? 'had no players' : 'was off-chain only'} - skipping ALL blockchain calls`);
         endGameConfirmed = false; // No need for settlements
-        
+
         // Still update Supabase and broadcast crash
         const total_volume = currentGameTicks
           .map((data) => data.value)
           .reduce((acc, val) => acc + val, 0);
-        
+
         supabase
           .from("games_rugs_fun")
           .update({
@@ -177,7 +179,7 @@ const startGame = async () => {
 
         // Start next game after delay (match normal game flow)
         setTimeout(() => {
-          timer = 8;
+          timer = 10;
           timerInterval = setInterval(() => {
             broadcast({
               type: "tick",
@@ -192,17 +194,25 @@ const startGame = async () => {
               startGame();
             }
           }, 1000);
-        }, 15000);
+        }, 20000);
         return; // Exit early - NO blockchain calls
       }
 
-      // 1. End Game On-Chain and WAIT for it (so settlements are valid)
+      // 1. Wait for on-chain start to complete, then end game
       console.log(`📡 Finalizing Game ${gameId} on-chain (${users.filter(u => u.trades.some(t => t.gameId === gameId)).length} players)...`);
+
+      // CRITICAL: Wait for on-chain start to complete before ending
+      if (onChainStartPromise) {
+        console.log(`⏳ Waiting for on-chain start to complete before ending...`);
+        await onChainStartPromise.catch(() => false); // Wait but don't throw
+        console.log(`✅ On-chain start complete, now ending game...`);
+      }
+
       withTimeout(onChainEndGame(gameId, currentMultiplier), 30000, "End Game On-Chain Timed Out")
         .then(async (endGameRes) => {
           if (endGameRes && endGameRes.success) {
             endGameConfirmed = true; // Gate unlocked
-            console.log(`✅ Game ${gameId} finalized on-chain. Proceeding with settlements.`);
+            console.log(`✅ Game ${gameId} finalized on-chain. TX: ${endGameRes.txHash || 'N/A'}`);
           } else {
             console.warn(`⚠️ EndGame attempt failed for Game ${gameId}. Deferring settlements.`);
             return; // ❗ DO NOT SETTLE if on-chain state isn't ready
@@ -230,6 +240,7 @@ const startGame = async () => {
                 ).then(async (settleRes) => {
                   if (settleRes.success) {
                     activeTrade.settled = true; // Mark only on success
+                    console.log(`✅ Win settled for ${user.userId}. TX: ${settleRes.txHash || 'N/A'}`);
                     if (ethers.isAddress(user.userId)) {
                       const { balance, balanceNano } = await syncBalance(user.userId);
                       // Final trade update broadcast
@@ -248,19 +259,51 @@ const startGame = async () => {
                   console.error(`❌ Failed/Timed out to settle trade for ${user.userId}:`, err);
                 });
               } else {
-                activeTrade.settled = true;
-                console.log(`📉 Game ${gameId}: Skipping on-chain settlement for ${user.userId} (Loser)`);
-                // Still notify user of their finalized status
-                getPlayerBalance(user.userId).then(({ balance, balanceNano }) => {
-                  if (user.socket && user.socket.readyState === WebSocket.OPEN) {
-                    user.socket.send(JSON.stringify({
-                      type: "trade-update",
-                      userId: user.userId,
-                      trades: user.trades,
-                      new_balance: balance,
-                      new_balance_nano: balanceNano,
-                    }));
+                // User Lost (Crashed) - Settle on-chain with multiplier=0 to deduct balance
+                console.log(`📉 Game ${gameId}: Settling LOSS on-chain for ${user.userId}`);
+                withTimeout(
+                  onChainSettleTrade(
+                    gameId,
+                    user.userId,
+                    activeTrade.buy_amount.toString(),
+                    0 // 0 multiplier = full loss
+                  ),
+                  30000,
+                  `Loss settlement for ${user.userId} timed out`
+                ).then(async (settleRes) => {
+                  if (settleRes.success) {
+                    activeTrade.settled = true;
+                    console.log(`✅ Loss settled on-chain for ${user.userId}. TX: ${settleRes.txHash || 'N/A'}`);
+                  } else {
+                    console.error(`❌ Failed to settle loss on-chain for ${user.userId}`);
                   }
+                  // Sync and notify user of their final balance
+                  if (ethers.isAddress(user.userId)) {
+                    const { balance, balanceNano } = await syncBalance(user.userId);
+                    if (user.socket && user.socket.readyState === WebSocket.OPEN) {
+                      user.socket.send(JSON.stringify({
+                        type: "trade-update",
+                        userId: user.userId,
+                        trades: user.trades,
+                        new_balance: balance,
+                        new_balance_nano: balanceNano,
+                      }));
+                    }
+                  }
+                }).catch(err => {
+                  console.error(`❌ Error settling loss for ${user.userId}:`, err);
+                  // Still try to notify user even on error
+                  getPlayerBalance(user.userId).then(({ balance, balanceNano }) => {
+                    if (user.socket && user.socket.readyState === WebSocket.OPEN) {
+                      user.socket.send(JSON.stringify({
+                        type: "trade-update",
+                        userId: user.userId,
+                        trades: user.trades,
+                        new_balance: balance,
+                        new_balance_nano: balanceNano,
+                      }));
+                    }
+                  });
                 });
               }
             }
@@ -310,9 +353,9 @@ const startGame = async () => {
         data: previousGames,
       });
 
-      // 2️⃣ Wait 15 seconds before starting WAITING timer
+      // 2️⃣ Wait 20 seconds before starting WAITING timer (30s total interval)
       setTimeout(() => {
-        timer = 8;
+        timer = 10;
         timerInterval = setInterval(() => {
           broadcast({
             type: "tick",
@@ -327,7 +370,7 @@ const startGame = async () => {
             startGame(); // start new game
           }
         }, 1000);
-      }, 15000);
+      }, 20000);
     }
   }, 500);
 };
@@ -508,37 +551,6 @@ wss.on("connection", (ws, req) => {
           return;
         }
 
-        // 🔥 FIRST BET → Start game on-chain now
-        if (!isOnChainGame) {
-          console.log(`🎯 First bet detected! Getting on-chain game ID...`);
-          try {
-            let onChainId = await withRetry(() => gameManagerContract.currentGameId());
-            const onChainGameActive = await gameManagerContract.gameActive();
-            
-            if (onChainGameActive) {
-              console.warn(`⚠️ Game ${onChainId} already active on-chain, force-ending first...`);
-              await onChainEndGame(Number(onChainId), 1.0).catch(() => {});
-              // Get new game ID after force-end
-              onChainId = await withRetry(() => gameManagerContract.currentGameId());
-            }
-            
-            // Use the on-chain game ID, not our local counter
-            gameId = Number(onChainId);
-            console.log(`📡 Starting Game ${gameId} on-chain...`);
-            
-            const startRes = await onChainStartGame(gameId);
-            if (startRes.success) {
-              isOnChainGame = true;
-              console.log(`✅ Game ${gameId} now active on-chain!`);
-            } else {
-              console.error(`❌ Failed to start on-chain, continuing off-chain with local ID`);
-            }
-          } catch (err) {
-            console.error(`❌ Error starting on-chain:`, err);
-            console.log(`⚠️ Continuing off-chain only`);
-          }
-        }
-
         // --- STATE GUARD: One trade per user per game ---
         const existingUser = users.find((u) => u.userId === data.userId);
         if (existingUser && existingUser.trades.some(t => t.gameId === gameId)) {
@@ -570,7 +582,11 @@ wss.on("connection", (ws, req) => {
         // DEBUG: Final Ledger Check
         console.log(`💎 Trade [${data.userId}]: Final: ${safeAmountNano}, Balance: ${balanceNano}, Diff: ${balanceBigInt - safeAmountNano}`);
 
-
+        // ==========================================
+        // CRITICAL FIX: Record trade IMMEDIATELY
+        // This ensures hasActiveTrades=true even if
+        // game crashes during on-chain setup
+        // ==========================================
         let user = users.find((u) => u.userId === data.userId);
         if (!user) {
           user = { userId: data.userId, trades: [], socket: ws };
@@ -583,37 +599,108 @@ wss.on("connection", (ws, req) => {
           id: Date.now(),
           gameId: gameId,
           buy: currentMultiplier,
-          buy_amount: Number(safeAmountNano), // Store in local memory
+          buy_amount: Number(safeAmountNano),
           userId: user.userId,
         };
 
-        // check for balance if trade is valid and update balance.
+        // Record trade IMMEDIATELY in memory (before any async ops)
+        user.trades.push(trade);
+        userTrades.push(trade);
+        console.log(`📝 Trade recorded in memory for ${user.userId} (Game ${gameId})`);
+
+        // 🚀 IMMEDIATELY broadcast so Cash Out button activates
+        // Balance will update again after Supabase confirms
+        const remainingNano = (balanceBigInt - safeAmountNano).toString();
+        broadcast({
+          type: "trade-update",
+          userId: user.userId,
+          trades: user.trades,
+          new_balance: Number(remainingNano) / 1_000_000_000,
+          new_balance_nano: remainingNano,
+        });
+
+        // �🔥 FIRST BET → Start game on-chain in BACKGROUND (non-blocking)
+        if (!isOnChainGame) {
+          console.log(`🎯 First bet detected! Starting on-chain in background...`);
+          isOnChainGame = true; // Mark immediately to prevent duplicate starts
+
+          // Store promise so crash handler can wait for it
+          onChainStartPromise = (async (): Promise<boolean> => {
+            try {
+              let onChainId = await withRetry(() => gameManagerContract.currentGameId());
+              const onChainGameActive = await gameManagerContract.gameActive();
+
+              if (onChainGameActive) {
+                console.warn(`⚠️ Game ${onChainId} already active on-chain, force-ending first...`);
+                await onChainEndGame(Number(onChainId), 1.0).catch(() => { });
+                onChainId = await withRetry(() => gameManagerContract.currentGameId());
+              }
+
+              // Update gameId to on-chain ID for settlements
+              const newGameId = Number(onChainId);
+              console.log(`📡 Starting Game ${newGameId} on-chain...`);
+
+              // Update all pending trades to use on-chain game ID
+              if (gameId !== newGameId) {
+                console.log(`🔄 Updating game ID from ${gameId} to ${newGameId}`);
+                users.forEach(u => {
+                  u.trades.forEach(t => {
+                    if (t.gameId === gameId) t.gameId = newGameId;
+                  });
+                });
+                userTrades.forEach(t => {
+                  if (t.gameId === gameId) t.gameId = newGameId;
+                });
+                gameId = newGameId;
+              }
+
+              const startRes = await onChainStartGame(newGameId);
+              if (startRes.success) {
+                console.log(`✅ Game ${newGameId} started on-chain. TX: ${startRes.txHash || 'N/A'}`);
+                return true;
+              } else {
+                console.error(`❌ Failed to start on-chain`);
+                return false;
+              }
+            } catch (err) {
+              console.error(`❌ Error starting on-chain:`, err);
+              return false;
+            }
+          })();
+        }
+
+        // Deduct balance in Supabase
         supabase
           .rpc("buy_trade", {
             p_wallet_address: data.userId,
-            p_amount_nano: safeAmountNano.toString() as any, // Use nano-units BIGINT
+            p_amount_nano: safeAmountNano.toString() as any,
             p_payout_multiplier: currentMultiplier,
             p_game_id: gameId.toString(),
           } as any)
-          .then(({ data, error }: { data: any; error: any }) => {
-            if (error || (data && data.success === false)) {
-              console.error("❌ Buy trade failed:", error || data?.error);
+          .then(({ data: rpcData, error }: { data: any; error: any }) => {
+            if (error || (rpcData && rpcData.success === false)) {
+              console.error("❌ Buy trade failed:", error || rpcData?.error);
+
+              // ROLLBACK: Remove trade from memory on failure
+              const tradeIndex = user.trades.findIndex(t => t.id === trade.id);
+              if (tradeIndex !== -1) user.trades.splice(tradeIndex, 1);
+              const globalIndex = userTrades.findIndex(t => t.id === trade.id);
+              if (globalIndex !== -1) userTrades.splice(globalIndex, 1);
+              console.log(`🔙 Trade rolled back for ${user.userId}`);
+
               ws.send(JSON.stringify({
                 type: "error",
-                message: data?.error || "Trade rejected: Insufficient balance or sequence error."
+                message: rpcData?.error || "Trade rejected: Insufficient balance or sequence error."
               }));
             } else {
-              console.log("✅ Buy trade result:", data);
-              // --- CRITICAL: Only record trade locally after DB SUCCESS ---
-              user.trades.push(trade);
-              userTrades.push(trade);
+              console.log("✅ Buy trade confirmed in Supabase:", rpcData);
 
               broadcast({
                 type: "trade-update",
                 userId: user.userId,
                 trades: user.trades,
-                new_balance: data.new_balance,
-                new_balance_nano: data.new_balance_nano, // Expose for precise Max Bet
+                new_balance: rpcData.new_balance,
+                new_balance_nano: rpcData.new_balance_nano,
               });
             }
           });
@@ -683,7 +770,7 @@ wss.on("connection", (ws, req) => {
 // --- Initialize Server ---
 const initServer = async () => {
   const host = '0.0.0.0';
-  
+
   console.log(`\n${'='.repeat(60)}`);
   console.log(`✅ WEBSOCKET SERVER RUNNING`);
   console.log(`${'='.repeat(60)}`);

@@ -74,7 +74,7 @@ export default function Home() {
   // Handling Auto Sell
   useEffect(() => {
     const autoSell = async () => {
-      const myTrades = allUserTrades.find((data) => data.userId == userId);
+      const myTrades = allUserTrades.find((data) => data.userId?.toLowerCase() === userId?.toLowerCase());
       const sellPrice = parseFloat(animatedMultiplierRef.current.toFixed(4));
       if (
         isApplied &&
@@ -94,10 +94,14 @@ export default function Home() {
   }, [targetMultiplierRef.current]);
 
   // Calculate if the user has an active bet for the current UI state
-  const myData = allUserTrades.find((d) => d.userId == userId);
+  // Use toLowerCase() for EVM address comparison (checksummed vs lowercase)
+  const myData = allUserTrades.find((d) => d.userId?.toLowerCase() === userId?.toLowerCase());
   const userHasBet = myData
     ? myData.trades.some((t) => t.buy > 0 && !t.sell)
     : false;
+
+  // Debug: Log when userHasBet changes
+  console.log(`[DEBUG] userHasBet=${userHasBet}, userId=${userId}, myData=`, myData);
 
   // helper: rounded rect (cross-browser)
   const drawRoundedRect = (
@@ -403,7 +407,7 @@ export default function Home() {
         const x =
           LEFT_PADDING +
           (buyIndex >= 0 ? buyIndex : visibleData.length - 1) *
-            (CANDLE_WIDTH + GAP) +
+          (CANDLE_WIDTH + GAP) +
           CANDLE_WIDTH / 2;
         const y = scaleY(buy);
         drawTradeMarker(ctx, x, y, "buy", markerLabel);
@@ -413,7 +417,7 @@ export default function Home() {
         const x =
           LEFT_PADDING +
           (sellIndex >= 0 ? sellIndex : visibleData.length) *
-            (CANDLE_WIDTH + GAP) +
+          (CANDLE_WIDTH + GAP) +
           CANDLE_WIDTH / 2;
         const y = scaleY(sell);
         drawTradeMarker(ctx, x, y, "sell", markerLabel);
@@ -497,9 +501,9 @@ export default function Home() {
 
     const estX = Math.min(
       LEFT_PADDING +
-        visibleData.length * (CANDLE_WIDTH + GAP) +
-        CANDLE_WIDTH +
-        8,
+      visibleData.length * (CANDLE_WIDTH + GAP) +
+      CANDLE_WIDTH +
+      8,
       width - 12 - ctx.measureText(label).width
     );
 
@@ -619,8 +623,8 @@ export default function Home() {
                         latency < 50
                           ? "border-green-500 text-green-500"
                           : latency < 100
-                          ? "border-yellow-500 text-yellow-500"
-                          : "border-red-500 text-red-500"
+                            ? "border-yellow-500 text-yellow-500"
+                            : "border-red-500 text-red-500"
                       )}
                     >
                       <Wifi size={12} strokeWidth={3} /> {latency}ms

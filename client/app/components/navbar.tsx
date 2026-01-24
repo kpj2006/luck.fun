@@ -174,12 +174,11 @@ export default function NeoNavbar() {
           <div className="flex items-center gap-4">
             <a href="/" className="block group relative">
               <div className="absolute inset-0 bg-yellow-400 translate-x-1 translate-y-1 group-hover:translate-x-0 group-hover:translate-y-0 transition-transform" />
-              <div className="relative border-2 border-black bg-zinc-900 p-1">
-                <img
-                  src="https://apneajyhbpncbciasirk.supabase.co/storage/v1/object/public/nft-storage/rugs-fun/rugs-fun-logo-cropped-png.png"
-                  alt="Logo"
-                  className="h-10 w-auto object-contain"
-                />
+              <div className="relative border-2 border-black bg-zinc-900 px-3 py-2">
+                <span className="font-black text-xl tracking-tighter">
+                  <span className="text-yellow-400">luck</span>
+                  <span className="text-white">.fun</span>
+                </span>
               </div>
             </a>
           </div>
