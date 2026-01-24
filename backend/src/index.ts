@@ -49,6 +49,8 @@ let timer = 0;
 let gameInterval: any;
 let timerInterval: any;
 let gameId: any;
+let localGameCounter = 1000; // Local counter for off-chain games
+let isOnChainGame = false; // Track if current game is on-chain
 let endGameConfirmed = false; // New gate for settlements
 
 let users: User[] = [];
@@ -84,65 +86,24 @@ const startGame = async () => {
   tickGenerator = createTickGenerator(target);
   currentGameTicks = [];
   endGameConfirmed = false;
-  gameState = "WAITING"; // Don't allow bets until on-chain is ready
+  isOnChainGame = false; // Start as off-chain
+  users = []; // Reset users for new game
 
-  // Get numerical game ID from contract
-  try {
-    // 1. Sync Game State and Solvency
-    const onChainGameActive = await gameManagerContract.gameActive();
-    const { assets, liabilities, surplus } = await getContractSolvency();
-    console.log(`🏦 Solvency Check: Assets: ${assets}, Liabilities: ${liabilities}, Surplus: ${surplus}`);
+  // Use local counter for off-chain games
+  gameId = localGameCounter++;
+  gameState = "ACTIVE"; // Start immediately without blockchain
+  
+  console.log(`🎮 Game ${gameId} starting OFF-CHAIN (no blockchain until someone bets)`);
+  
+  // Register in Supabase
+  const { error: sbError } = await supabase
+    .from("games_rugs_fun")
+    .upsert({
+      game_id: gameId.toString(),
+    }, { onConflict: 'game_id' });
 
-    let onChainId = await withRetry(() => gameManagerContract.currentGameId());
-    gameId = Number(onChainId);
-
-    if (onChainGameActive) {
-      console.warn(`⚠️ Game ${gameId} already active on-chain. Attaching instead of resetting.`);
-      // Sync with Supabase (Upsert)
-      const { error: sbError } = await supabase
-        .from("games_rugs_fun")
-        .upsert({
-          game_id: gameId.toString(),
-        }, { onConflict: 'game_id' });
-
-      if (sbError) console.error("❌ Supabase Sync Failed:", sbError);
-
-      gameState = "ACTIVE";
-    } else {
-      console.log(`📡 Syncing with Monad: Game ID ${gameId}`);
-      users = []; // Reset users only for a NEW game
-
-      // 1. Register in Supabase first (Upsert to avoid collisions)
-      const { error: sbError } = await supabase
-        .from("games_rugs_fun")
-        .upsert({
-          game_id: gameId.toString(),
-        }, { onConflict: 'game_id' });
-
-      if (sbError) {
-        console.error("❌ Supabase Game Registration Failed:", sbError);
-      } else {
-        console.log(`✅ Supabase Sync: Game ${gameId} registered.`);
-      }
-
-      // 2. Start on-chain (WAIT for it)
-      console.log(`⛓️  Starting Game ${gameId} on-chain...`);
-      const startRes = await onChainStartGame(gameId);
-
-      if (!startRes.success) {
-        console.error(`🛑 ABORT: Failed to start game ${gameId} on-chain. Check wallet/nonce.`);
-        gameState = "WAITING";
-        return;
-      }
-
-      console.log(`🚀 Game ${gameId} ACTIVE on-chain!`);
-      gameState = "ACTIVE";
-    }
-
-  } catch (err) {
-    console.error("❌ Fatal Startup Error:", err);
-    gameState = "WAITING";
-    return;
+  if (sbError) {
+    console.error("❌ Supabase Game Registration Failed:", sbError);
   }
 
   // Tick generator loop
@@ -171,19 +132,77 @@ const startGame = async () => {
         user.trades.some(trade => trade.gameId === gameId)
       );
 
-      // Always END game on-chain (to increment game ID), but skip settlements if no players
-      console.log(`📡 Finalizing Game ${gameId} on-chain... ${hasActiveTrades ? `(${users.filter(u => u.trades.some(t => t.gameId === gameId)).length} players)` : '(no players - will skip settlements)'}`);
+      if (!hasActiveTrades || !isOnChainGame) {
+        console.log(`⏭️  Game ${gameId} ${!hasActiveTrades ? 'had no players' : 'was off-chain only'} - skipping ALL blockchain calls`);
+        endGameConfirmed = false; // No need for settlements
+        
+        // Still update Supabase and broadcast crash
+        const total_volume = currentGameTicks
+          .map((data) => data.value)
+          .reduce((acc, val) => acc + val, 0);
+        
+        supabase
+          .from("games_rugs_fun")
+          .update({
+            crash_multiplier: currentMultiplier,
+            total_volume: total_volume,
+          })
+          .eq("game_id", gameId.toString())
+          .then(({ error }) => {
+            if (error) console.error("❌ Error updating game in Supabase:", error);
+            else console.log("✅ Game result updated in Supabase (no players).");
+          });
+
+        // Add to history
+        previousGames.push({
+          id: Date.now(),
+          crashedAt: currentMultiplier,
+          ticks: currentGameTicks,
+        });
+        if (previousGames.length > 10) {
+          previousGames.shift();
+        }
+        currentGameTicks = [];
+
+        broadcast({
+          type: "tick",
+          multiplier: currentMultiplier,
+          state: "CRASHED",
+          timer: 0,
+        });
+        broadcast({
+          type: "prev-game",
+          data: previousGames,
+        });
+
+        // Start next game after delay (match normal game flow)
+        setTimeout(() => {
+          timer = 8;
+          timerInterval = setInterval(() => {
+            broadcast({
+              type: "tick",
+              multiplier: currentMultiplier,
+              state: "WAITING",
+              timer,
+            });
+            timer--;
+
+            if (timer < 0) {
+              clearInterval(timerInterval);
+              startGame();
+            }
+          }, 1000);
+        }, 15000);
+        return; // Exit early - NO blockchain calls
+      }
+
+      // 1. End Game On-Chain and WAIT for it (so settlements are valid)
+      console.log(`📡 Finalizing Game ${gameId} on-chain (${users.filter(u => u.trades.some(t => t.gameId === gameId)).length} players)...`);
       withTimeout(onChainEndGame(gameId, currentMultiplier), 30000, "End Game On-Chain Timed Out")
         .then(async (endGameRes) => {
           if (endGameRes && endGameRes.success) {
             endGameConfirmed = true; // Gate unlocked
-            console.log(`✅ Game ${gameId} finalized on-chain.`);
-            
-            // Only settle trades if there were players
-            if (!hasActiveTrades) {
-              console.log(`⏭️  No players - skipping settlements`);
-              return; // Skip settlement loop
-            }
+            console.log(`✅ Game ${gameId} finalized on-chain. Proceeding with settlements.`);
           } else {
             console.warn(`⚠️ EndGame attempt failed for Game ${gameId}. Deferring settlements.`);
             return; // ❗ DO NOT SETTLE if on-chain state isn't ready
@@ -487,6 +506,31 @@ wss.on("connection", (ws, req) => {
         if (gameState !== "ACTIVE") {
           ws.send(JSON.stringify({ type: "error", message: "Market is closed. Please wait for the next round." }));
           return;
+        }
+
+        // 🔥 FIRST BET → Start game on-chain now
+        if (!isOnChainGame) {
+          console.log(`🎯 First bet detected! Starting Game ${gameId} on-chain...`);
+          try {
+            const onChainId = await withRetry(() => gameManagerContract.currentGameId());
+            const onChainGameActive = await gameManagerContract.gameActive();
+            
+            if (onChainGameActive) {
+              console.warn(`⚠️ Game already active on-chain, force-ending first...`);
+              await onChainEndGame(Number(onChainId), 1.0).catch(() => {});
+            }
+            
+            const startRes = await onChainStartGame(gameId);
+            if (startRes.success) {
+              isOnChainGame = true;
+              console.log(`✅ Game ${gameId} now active on-chain!`);
+            } else {
+              console.error(`❌ Failed to start on-chain, continuing off-chain only`);
+            }
+          } catch (err) {
+            console.error(`❌ Error starting on-chain:`, err);
+            console.log(`⚠️ Continuing off-chain only`);
+          }
         }
 
         // --- STATE GUARD: One trade per user per game ---
