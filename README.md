@@ -51,6 +51,37 @@ The game integrates **Web3 wallets**, **real-time WebSocket events**, and **on-c
 
 ---
 
+┌─────────────────────────────────────────────────────────────┐
+│                         FRONTEND                            │
+│  Next.js 14 + React + TypeScript + TailwindCSS             │
+│  • Game UI & Multiplier Display                             │
+│  • Wallet Connection (MetaMask)                             │
+│  • Real-time Chat                                           │
+│  • PWA Support                                              │
+└──────────────┬──────────────────────────────┬───────────────┘
+               │                              │
+          WebSocket                      Contract Calls
+               │                              │
+┌──────────────▼──────────────┐   ┌──────────▼───────────────┐
+│         BACKEND              │   │    SMART CONTRACTS       │
+│  Node.js + TypeScript        │   │   Foundry + Solidity     │
+│  • WebSocket Server          │   │   • Game Logic           │
+│  • Game State Manager        │   │   • Token Management     │
+│  • Round Controller          │   │   • Deposit/Withdraw     │
+│  • Player Actions            │   │   • Fairness Logic       │
+└──────────────┬───────────────┘   └──────────────────────────┘
+               │                              │
+               │                              │
+┌──────────────▼──────────────────────────────▼───────────────┐
+│                      SUPABASE                                │
+│  PostgreSQL Database                                         │
+│  • User balances & history                                   │
+│  • Game rounds & results                                     │
+│  • Leaderboards                                              │
+│  • Chat messages                                             │
+└──────────────────────────────────────────────────────────────┘
+
+
 ## 🛠 Tech Stack
 
 - **Next.js 14** (Frontend Framework)
