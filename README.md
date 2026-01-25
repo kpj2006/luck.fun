@@ -1,69 +1,61 @@
-# Monad Farcaster Mini App Template
+# luck-Fun 
 
-A production-ready starting point for building Farcaster Mini Apps on the Monad blockchain.
+## 📝 Brief Description
 
-## � The Idea
-a
-**Where Social Meets On-Chain.**
-This template bridges the gap between social feeds and blockchain utility. It allows developers to build lightweight applications that run natively inside Farcaster clients (like Warpcast), leveraging Farcaster's social context while performing high-performance on-chain actions on Monad.
+**luck.fun** is an **on-chain trading crash game** built on **Monad**, combining crypto trading mechanics with real-time multiplayer gameplay.
 
-## 🔗 Monad Testnet Contracts
+Players deposit tokens, ride the multiplier, and **cash out before it luck**.
 
-| Contract | Address |
-| :--- | :--- |
-| **RUGS Token** | `0x4297F610EF0E14E988494507dF51Fb2E396A9fF3` |
-| **RUGS Fun** | `0x3e52d90257fF7db1c0e300FD4c9EfBa4F0C233D3` |
-| **Game Manager** | `0x279b095b1a44d1d91754359AA45725fb376185BE` |
-| **Treasury** | `0x6AaAbB7085076A46B2B6b8E98BEAb0CFC56Cf910` |
+The game integrates **Web3 wallets**, **real-time WebSocket events**, and **on-chain transactions** to create a fully decentralized, high-adrenaline trading experience.
 
-## �🚀 Quick Start
+---
 
-1. **Clone & Install**
-   ```bash
-   git clone https://github.com/monad-developers/monad-miniapp-template.git
-   cd monad-miniapp-template
-   pnpm install
-   ```
 
-2. **Environment Setup**
-   ```bash
-   cp .env.local.example .env.local
-   # Set NEXT_PUBLIC_URL to your app's public URL
-   ```
+## ✨ Core Features
 
-3. **Development**
-   ```bash
-   pnpm dev
-   ```
+- 💥 **Crash Game Mechanics**
+    - Watch the live multiplier rise.
+    - Cash out at any time before it crashes after 5 sec.
+    - If it luck before you sell — you lose your stake.
+- 💸 **Deposit & Withdraw**
+    - Seamless token deposits and withdrawals using Rugs(deployed by us on Monad).
+- 🤖 **Auto-Sell Functionality**
+    - Players can set an **auto-sell multiplier**.
+    - Automatically sells when target multiplier is reached — even if you’re AFK.
+- 🧠 **Smart Contract-Driven Fairness**
+    - Game logic secured by on-chain programs.
+    - Transparent round results — no centralized control.
+- 💬 **Global Chat**
+    - Players can chat, share wins, and interact live during gameplay.
 
-## 🛠 Features
+---
 
-- **Farcaster Native**: Context hooks, native actions (cast, profile), and UI safety insets.
-- **Monad Integration**: Built-in wallet support, Viem/Wagmi configured for Monad Testnet.
-- **Tech Stack**: Next.js 15 (App Router), React 19, Tailwind CSS, Radix UI, Framer Motion.
-- **Ready to Go**: Includes Supabase integration and essential styling.
+## ⚙️ Instructions
 
-## 🧪 Local Testing
+1. **Connect Wallet**
+    - Log in using **Metamask**.
+    - Verify your balance and connected address.
+2. **Deposit Tokens**
+    - Deposit Mon tokens into your **luck.fun** account.
+3. **Place a Trade**
+    - Choose your stake and join the round before it starts(before 5 sec)   .
+    - Watch the multiplier increase in real-time.
+4. **Cash Out**
+    - Click **Sell** to exit before the multiplier “luck”.
+    - Your payout = `stake × current multiplier`.
+5. **Auto-Sell (Optional)**
+    - Set a target multiplier.
+    - System automatically executes sell when target is reached.
+6. **Withdraw Winnings**
+    - Withdraw tokens directly to your wallet at any time.
 
-Mini Apps require a public URL for Warpcast integration.
+---
 
-1. **Tunnel**: `cloudflared tunnel --url http://localhost:3000` (or use ngrok).
-2. **Update `.env`**: Set `NEXT_PUBLIC_URL` to your tunnel URL.
-3. **Warpcast**: Test via [Warpcast Embed Tool](https://warpcast.com/~/developers/mini-apps/embed).
+## 🛠 Tech Stack
 
-## 📁 Key Files
-
-- `app/page.tsx`: Mini App configuration and main entry.
-- `components/pages/app.tsx`: Main application UI shell.
-- `app/.well-known/farcaster.json/route.ts`: Farcaster manifest configuration.
-- `constants/constants.ts`: Contract addresses and configuration.
-
-## 📦 Deployment
-
-Deploy to **Vercel** or any Next.js host. Ensure `NEXT_PUBLIC_URL` is set to your production domain in the dashboard.
-
-## 📚 Resources
-
-- [Farcaster Mini Apps Docs](https://miniapps.farcaster.xyz/)
-- [Monad Documentation](https://docs.monad.xyz/)
-- [Warpcast Embed Tool](https://warpcast.com/~/developers/mini-apps/embed)
+- **Next.js 14** (Frontend Framework)
+- **React 19**
+- **TypeScript**
+- **Tailwind CSS + shadcn/ui** (UI Components)
+- **WebSockets** (Real-time multiplier + trade updates)
+- **Monad essentials** (Smart contracts) 
