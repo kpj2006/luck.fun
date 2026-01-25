@@ -47,7 +47,7 @@ This Mini App showcases the power of combining Farcaster's social features with 
 git clone https://github.com/monad-developers/monad-miniapp-template.git
 cd monad-miniapp-template
 ```
-
+ 
 2. **Install dependencies**
 
 ```bash
